@@ -114,15 +114,6 @@ main();
 
 ## Distribution & Publishing
 
-### NPM Package (JS SDK)
-To publish the TypeScript SDK to NPM:
-```bash
-cd js-sdk
-npm install
-npm run build
-npm publish --access public
-```
-
 ### Ubuntu/Debian (.deb)
 We support generating `.deb` packages via `cargo-deb`:
 1. Install tool: `cargo install cargo-deb`
