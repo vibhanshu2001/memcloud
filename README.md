@@ -2,6 +2,50 @@
 
 **MemCloud** is a distributed in-memory data store written in Rust. It allows nodes (such as macOS and Linux machines) on a local network to pool their RAM, creating a shared, ephemeral storage cloud.
 
+## 🏗️ Architecture
+```mermaid
+flowchart TD
+
+    subgraph AppLayer[Application Layer]
+        CLI["MemCLI (optional)"]
+        SDK["JS / Python / Rust SDK"]
+    end
+
+    subgraph LocalDaemon["MemCloud Daemon (Local Device)"]
+        RPC["Local RPC API<br/>(Unix Socket / TCP)"]
+        BlockMgr["Block Manager<br/>(Store/Load/Free)"]
+        PeerMgr["Peer Manager<br/>(Connections & Routing)"]
+        RAM[("Local RAM Cache")]
+        Discovery["mDNS Discovery"]
+    end
+
+    subgraph RemoteDevice["Remote Device(s)"]
+        RemoteDaemon["Remote MemCloud Daemon"]
+        RemoteRAM[("Remote RAM Storage")]
+    end
+
+    %% Connections inside local device
+    CLI --> RPC
+    SDK --> RPC
+
+    RPC --> BlockMgr
+    BlockMgr --> RAM
+    BlockMgr --> PeerMgr
+    PeerMgr --> Discovery
+
+    %% Connections across network
+    Discovery --> RemoteDaemon
+    PeerMgr <-->|TCP / Binary RPC| RemoteDaemon
+
+    %% Remote relationships
+    RemoteDaemon --> RemoteRAM
+```
+1.  **MemNode**: The core daemon running on each machine. It handles storage, networking, and discovery.
+- `memsdk/`: Rust & C SDK Library.
+- `memcli/`: The command-line client.
+- `js-sdk/`: TypeScript SDK.
+- `installers/`: Systemd/Launchd scripts.
+
 ## Features
 
 - **Distributed Storage**: Seamlessly store and retrieve data blocks across peers.
@@ -104,50 +148,6 @@ async function main() {
 
 main();
 ```
-
-## 🏗️ Architecture
-```mermaid
-flowchart TD
-
-    subgraph AppLayer[Application Layer]
-        CLI["MemCLI (optional)"]
-        SDK["JS / Python / Rust SDK"]
-    end
-
-    subgraph LocalDaemon["MemCloud Daemon (Local Device)"]
-        RPC["Local RPC API\n(Unix Socket / TCP)"]
-        BlockMgr["Block Manager\n(Store/Load/Free)"]
-        PeerMgr["Peer Manager\n(Connections & Routing)"]
-        RAM[("Local RAM Cache")]
-        Discovery["mDNS Discovery"]
-    end
-
-    subgraph RemoteDevice["Remote Device(s)"]
-        RemoteDaemon["Remote MemCloud Daemon"]
-        RemoteRAM[("Remote RAM Storage")]
-    end
-
-    %% Connections inside local device
-    CLI --> RPC
-    SDK --> RPC
-
-    RPC --> BlockMgr
-    BlockMgr --> RAM
-    BlockMgr --> PeerMgr
-    PeerMgr --> Discovery
-
-    %% Connections across network
-    Discovery --> RemoteDaemon
-    PeerMgr <-->|TCP / Binary RPC| RemoteDaemon
-
-    %% Remote relationships
-    RemoteDaemon --> RemoteRAM
-```
-1.  **MemNode**: The core daemon running on each machine. It handles storage, networking, and discovery.
-- `memsdk/`: Rust & C SDK Library.
-- `memcli/`: The command-line client.
-- `js-sdk/`: TypeScript SDK.
-- `installers/`: Systemd/Launchd scripts.
 
 ## Distribution & Publishing
 
