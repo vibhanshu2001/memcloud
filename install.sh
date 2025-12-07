@@ -36,7 +36,17 @@ log_error() {
 log_info "Detecting system architecture..."
 OS="$(uname -s)"
 ARCH="$(uname -m)"
-VERSION="v0.1.0"
+
+# Fetch latest version from GitHub API
+log_info "Checking for latest version..."
+VERSION=$(curl -s https://api.github.com/repos/vibhanshu2001/memcloud/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+
+if [ -z "$VERSION" ]; then
+    log_warn "Could not fetch latest version. Defaulting to v0.1.0"
+    VERSION="v0.1.0"
+else
+    log_info "Latest version is $VERSION"
+fi
 
 case "$OS" in
   Linux)
