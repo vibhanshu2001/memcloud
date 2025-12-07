@@ -105,6 +105,19 @@ enum Commands {
         /// Optional: Flush specific peer (by name or ID) instead of local
         #[arg(long)]
         peer: Option<String>,
+        /// Optional: Flush ALL connected peers and local node
+        #[arg(long)]
+        all: bool,
+    },
+    /// Stream data from stdin or file
+    Stream {
+        /// Input file (if not provided, reads from stdin)
+        #[arg(name = "FILE")]
+        file: Option<String>,
+        
+        /// Optional: Target specific peer
+        #[arg(long)]
+        peer: Option<String>,
     },
 }
 
@@ -371,8 +384,12 @@ async fn handle_data_command(cmd: Commands, client: &mut MemCloudClient) -> anyh
         }
             // For now, simple client version is enough.
 
-        Commands::Flush { force, peer } => {
-            let target_desc = peer.clone().unwrap_or_else(|| "LOCAL node".to_string());
+        Commands::Flush { force, peer, all } => {
+            let target_desc = if all {
+                "WHOLE CLUSTER (all peers + local)".to_string()
+            } else {
+                peer.clone().unwrap_or_else(|| "LOCAL node".to_string())
+            };
 
             if !force {
                 println!("⚠️  WARNING: This will delete ALL data stored on the {}.", target_desc);
@@ -386,9 +403,42 @@ async fn handle_data_command(cmd: Commands, client: &mut MemCloudClient) -> anyh
                 }
             }
             
-            println!("🧹 Flushing memory on {}...", target_desc);
-            client.flush(peer).await?;
-            println!("✅ Memory flushed.");
+            if all {
+                println!("🧹 Flushing CLUSTER...");
+                let peers = client.list_peers().await?;
+                for p in peers {
+                    print!("   - Flushing peer {} ({}) ... ", p.name, p.addr);
+                    if let Err(e) = client.flush(Some(p.id)).await {
+                        println!("❌ Failed: {}", e);
+                    } else {
+                        println!("✅");
+                    }
+                }
+                print!("   - Flushing LOCAL node ... ");
+                client.flush(None).await?;
+                println!("✅");
+                println!("✅ Cluster flushed.");
+            } else {
+                println!("🧹 Flushing memory on {}...", target_desc);
+                client.flush(peer).await?;
+                println!("✅ Memory flushed.");
+            }
+        }
+        Commands::Stream { file, peer } => {
+            let start = Instant::now();
+            let id = if let Some(path) = file {
+                 // Open file
+                 let f = tokio::fs::File::open(&path).await?;
+                 let meta = f.metadata().await?;
+                 client.stream_data(f, Some(meta.len()), peer.clone()).await?
+            } else {
+                 // Stdin
+                 println!("Reading from stdin (Ctrl+D to finish)...");
+                 let stdin = tokio::io::stdin();
+                 client.stream_data(stdin, None, peer.clone()).await?
+            };
+            let duration = start.elapsed();
+            println!("Streamed block ID: {} (took {:?})", id, duration);
         }
     }
     Ok(())

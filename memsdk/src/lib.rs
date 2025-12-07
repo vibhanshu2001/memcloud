@@ -44,7 +44,7 @@ pub enum SdkCommand {
     Stat,
     StreamStart { size_hint: Option<u64> },
     StreamChunk { stream_id: u64, chunk_seq: u32, #[serde(with = "serde_bytes")] data: Vec<u8> },
-    StreamFinish { stream_id: u64 },
+    StreamFinish { stream_id: u64, target: Option<String> },
     Flush { target: Option<String> },
 }
 
@@ -210,6 +210,47 @@ impl MemCloudClient {
             SdkResponse::FlushSuccess => Ok(()),
             SdkResponse::Error { msg } => anyhow::bail!(msg),
             _ => anyhow::bail!("Unexpected response"),
+        }
+    }
+
+    pub async fn stream_data<R>(&mut self, mut source: R, size_hint: Option<u64>, target: Option<String>) -> Result<BlockId> 
+    where R: tokio::io::AsyncRead + Unpin 
+    {
+        // 1. Start
+        let start_cmd = SdkCommand::StreamStart { size_hint };
+        let stream_id = match self.send_command(start_cmd).await? {
+            SdkResponse::StreamStarted { stream_id } => stream_id,
+            SdkResponse::Error { msg } => anyhow::bail!(msg),
+            _ => anyhow::bail!("Unexpected response to StreamStart"),
+        };
+
+        // 2. Chunks
+        let mut buffer = vec![0u8; 1024 * 64]; // 64KB chunks
+        let mut seq = 0;
+        loop {
+            let n = source.read(&mut buffer).await?;
+            if n == 0 { break; }
+            
+            let chunk_cmd = SdkCommand::StreamChunk {
+                stream_id,
+                chunk_seq: seq,
+                data: buffer[..n].to_vec(),
+            };
+            
+            match self.send_command(chunk_cmd).await? {
+                SdkResponse::Success => {},
+                SdkResponse::Error { msg } => anyhow::bail!(msg),
+                _ => anyhow::bail!("Unexpected response to StreamChunk"),
+            }
+            seq += 1;
+        }
+
+        // 3. Finish
+        let finish_cmd = SdkCommand::StreamFinish { stream_id, target };
+        match self.send_command(finish_cmd).await? {
+            SdkResponse::Stored { id } => Ok(id),
+            SdkResponse::Error { msg } => anyhow::bail!(msg),
+            _ => anyhow::bail!("Unexpected response to StreamFinish"),
         }
     }
 }
