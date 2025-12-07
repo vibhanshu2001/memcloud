@@ -28,7 +28,10 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    env_logger::init();
+    // Initialize logger with mDNS logs suppressed to avoid "No route to host" spam on macOS
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
+        .filter_module("mdns_sd", log::LevelFilter::Off)
+        .init();
     let args = Args::parse();
     let node_id = Uuid::new_v4();
 

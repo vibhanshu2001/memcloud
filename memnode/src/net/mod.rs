@@ -38,7 +38,7 @@ pub enum Message {
 
 use std::sync::Arc;
 use crate::peers::PeerManager;
-use crate::blocks::InMemoryBlockManager; // or BlockManager trait if refactored
+use crate::blocks::{InMemoryBlockManager, BlockManager}; // Added BlockManager trait
 
 pub struct TransportServer {
     listener: TcpListener,
