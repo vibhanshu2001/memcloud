@@ -12,6 +12,6 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "memcloud": "file:../../js-sdk"
+    "memcloud": "^0.2.0"
   }
 }
