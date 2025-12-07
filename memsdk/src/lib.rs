@@ -32,18 +32,18 @@ mod string_id {
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "cmd")]
 pub enum SdkCommand {
-    Store { data: Vec<u8> },
-    StoreRemote { data: Vec<u8>, target: Option<String> },
+    Store { #[serde(with = "serde_bytes")] data: Vec<u8> },
+    StoreRemote { #[serde(with = "serde_bytes")] data: Vec<u8>, target: Option<String> },
     Load { #[serde(with = "string_id")] id: BlockId },
     Free { #[serde(with = "string_id")] id: BlockId },
     ListPeers,
     Connect { addr: String },
-    Set { key: String, data: Vec<u8> },
+    Set { key: String, #[serde(with = "serde_bytes")] data: Vec<u8> },
     Get { key: String },
     ListKeys { pattern: String },
     Stat,
     StreamStart { size_hint: Option<u64> },
-    StreamChunk { stream_id: u64, chunk_seq: u32, data: Vec<u8> },
+    StreamChunk { stream_id: u64, chunk_seq: u32, #[serde(with = "serde_bytes")] data: Vec<u8> },
     StreamFinish { stream_id: u64 },
 }
 
@@ -51,7 +51,7 @@ pub enum SdkCommand {
 #[serde(tag = "res")]
 pub enum SdkResponse {
     Stored { #[serde(with = "string_id")] id: BlockId },
-    Loaded { data: Vec<u8> },
+    Loaded { #[serde(with = "serde_bytes")] data: Vec<u8> },
     Success,
     List { items: Vec<String> },
     Error { msg: String },
