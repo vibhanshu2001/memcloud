@@ -83,6 +83,8 @@ enum Commands {
     Get {
         key: String,
     },
+    /// Check the version of memcli and the connected node
+    Version,
 }
 
 #[derive(Subcommand)]
@@ -249,6 +251,12 @@ async fn handle_data_command(cmd: Commands, client: &mut MemCloudClient) -> anyh
             println!("Get '{}' -> '{}' (took {:?})", key, value, duration);
         }
         Commands::Node { .. } => unreachable!(), // Handled above
+        Commands::Version => {
+            println!("memcli {}", env!("CARGO_PKG_VERSION"));
+            // Try to connect to node to get its version?
+            // Currently RPC doesn't have a version method.
+            // For now, simple client version is enough.
+        }
     }
     Ok(())
 }

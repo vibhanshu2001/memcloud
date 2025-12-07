@@ -59,15 +59,34 @@ fi
 echo ""
 log_info "Disintegrating MemCloud binaries from your system paths..."
 
-if [ -f /usr/local/bin/memnode ]; then
-    sudo rm -f /usr/local/bin/memnode
-    log_info "Removed memnode binary."
-fi
+# Function to remove binary
+remove_binary() {
+    BIN_NAME=$1
+    # Check common locations
+    LOCATIONS="/usr/local/bin/$BIN_NAME $HOME/.cargo/bin/$BIN_NAME"
+    
+    # Also check where it is currently in path
+    if command -v "$BIN_NAME" >/dev/null 2>&1; then
+        CURRENT_PATH=$(command -v "$BIN_NAME")
+        LOCATIONS="$LOCATIONS $CURRENT_PATH"
+    fi
 
-if [ -f /usr/local/bin/memcli ]; then
-    sudo rm -f /usr/local/bin/memcli
-    log_info "Removed memcli binary."
-fi
+    # Deduplicate and remove
+    for LOC in $LOCATIONS; do
+        if [ -f "$LOC" ]; then
+            if [ -w "$(dirname "$LOC")" ]; then
+                rm -f "$LOC"
+            else
+                sudo rm -f "$LOC"
+            fi
+            log_info "Removed $BIN_NAME from $LOC"
+        fi
+    done
+}
+
+remove_binary "memnode"
+remove_binary "memcli"
+
 
 # Remove Unix socket
 if [ -S /tmp/memcloud.sock ]; then
