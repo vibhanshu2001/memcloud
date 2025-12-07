@@ -11,7 +11,7 @@ flowchart TD
         SDK["JS / Python / Rust SDK"]
     end
 
-    subgraph LocalDaemon["MemCloud Daemon (Local Device)"]
+    subgraph LocalDaemon["MemCloud Daemon(Local)"]
         RPC["Local RPC API<br/>(Unix Socket / TCP)"]
         BlockMgr["Block Manager<br/>(Store/Load/Free)"]
         PeerMgr["Peer Manager<br/>(Connections & Routing)"]
