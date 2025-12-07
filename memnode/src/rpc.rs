@@ -46,7 +46,7 @@ pub enum SdkCommand {
     // Streaming Commands
     StreamStart { size_hint: Option<u64> },
     StreamChunk { stream_id: u64, chunk_seq: u32, #[serde(with = "serde_bytes")] data: Vec<u8> },
-    StreamFinish { stream_id: u64 },
+    StreamFinish { stream_id: u64, target: Option<String> },
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -233,9 +233,26 @@ where S: AsyncReadExt + AsyncWriteExt + Unpin
                     Err(e) => SdkResponse::Error { msg: e.to_string() },
                 }
             }
-            SdkCommand::StreamFinish { stream_id } => {
-                match block_manager.finish_stream(stream_id) {
-                    Ok(id) => SdkResponse::Stored { id },
+            SdkCommand::StreamFinish { stream_id, target } => {
+                match block_manager.finalize_stream(stream_id) {
+                    Ok(data) => {
+                         let id = rand::random::<u64>();
+                         let block = Block { id, data };
+                         
+                         if let Some(t) = target {
+                             // Remote
+                             match block_manager.put_block_remote(block, Some(t)).await {
+                                 Ok(_) => SdkResponse::Stored { id },
+                                 Err(e) => SdkResponse::Error { msg: e.to_string() },
+                             }
+                         } else {
+                             // Local
+                             match block_manager.put_block(block) {
+                                 Ok(_) => SdkResponse::Stored { id },
+                                 Err(e) => SdkResponse::Error { msg: e.to_string() },
+                             }
+                         }
+                    }
                     Err(e) => SdkResponse::Error { msg: e.to_string() },
                 }
             }

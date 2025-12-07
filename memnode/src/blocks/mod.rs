@@ -201,13 +201,9 @@ impl InMemoryBlockManager {
         }
     }
 
-    pub fn finish_stream(&self, stream_id: u64) -> Result<BlockId> {
+    pub fn finalize_stream(&self, stream_id: u64) -> Result<Vec<u8>> {
         if let Some((_, data)) = self.active_uploads.remove(&stream_id) {
-            let id = rand::random::<u64>();
-            let block = Block { id, data };
-            self.put_block(block)?;
-            info!("Finished stream ID: {} -> Block ID: {}", stream_id, id);
-            Ok(id)
+            Ok(data)
         } else {
             anyhow::bail!("Stream ID {} not found", stream_id);
         }
