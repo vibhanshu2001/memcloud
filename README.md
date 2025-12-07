@@ -110,21 +110,21 @@ main();
 flowchart TD
 
     subgraph AppLayer[Application Layer]
-        CLI[MemCLI (optional)]
-        SDK[JS / Python / Rust SDK]
+        CLI["MemCLI (optional)"]
+        SDK["JS / Python / Rust SDK"]
     end
 
-    subgraph LocalDaemon[MemCloud Daemon (Local Device)]
-        RPC[Local RPC API\n(Unix Socket / TCP)]
-        BlockMgr[Block Manager\n(Store/Load/Free)]
-        PeerMgr[Peer Manager\n(Connections & Routing)]
-        RAM[(Local RAM Cache)]
-        Discovery[mDNS Discovery]
+    subgraph LocalDaemon["MemCloud Daemon (Local Device)"]
+        RPC["Local RPC API\n(Unix Socket / TCP)"]
+        BlockMgr["Block Manager\n(Store/Load/Free)"]
+        PeerMgr["Peer Manager\n(Connections & Routing)"]
+        RAM[("Local RAM Cache")]
+        Discovery["mDNS Discovery"]
     end
 
-    subgraph RemoteDevice[Remote Device(s)]
-        RemoteDaemon[Remote MemCloud Daemon]
-        RemoteRAM[(Remote RAM Storage)]
+    subgraph RemoteDevice["Remote Device(s)"]
+        RemoteDaemon["Remote MemCloud Daemon"]
+        RemoteRAM[("Remote RAM Storage")]
     end
 
     %% Connections inside local device
