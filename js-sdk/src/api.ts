@@ -17,105 +17,94 @@ export class MemCloud {
     }
 
     async store(data: string | Buffer, target?: string): Promise<Handle> {
-        // Convert data to number array for Rust Vec<u8> via serde_json? 
-        // Rust serde_json `Vec<u8>` expects an Array of integers `[1, 2, ...]` usually.
-        // It does NOT support raw byte string by default unless using `serde_bytes`.
-        // We defined SdkCommand { data: Vec<u8> }.
-        // JSON: `{ "Store": { "data": [ ... ] } }`.
-
         const payload = Buffer.isBuffer(data) ? data : Buffer.from(data);
-        const dataArray = Array.from(payload);
 
         let cmd: any;
         if (target) {
             console.log(`Storing ${payload.length} bytes on peer '${target}'...`);
-            cmd = { StoreRemote: { data: dataArray, target } };
+            cmd = { cmd: 'StoreRemote', data: payload, target };
         } else {
             console.log(`Storing ${payload.length} bytes...`);
-            cmd = { Store: { data: dataArray } };
+            cmd = { cmd: 'Store', data: payload };
         }
 
         const resp = await this.socket.request(cmd);
 
-        if (resp.Stored) {
-            console.log(`Stored Block ID: ${resp.Stored.id}`);
-            return { id: resp.Stored.id };
-        } else if (resp.Error) {
-            throw new Error(resp.Error.msg);
+        if (resp.res === 'Stored') {
+            console.log(`Stored Block ID: ${resp.id}`);
+            return { id: resp.id };
+        } else if (resp.res === 'Error') {
+            throw new Error(resp.msg);
         }
-        throw new Error("Unknown response");
+        throw new Error("Unknown response: " + JSON.stringify(resp));
     }
 
     async load(idOrHandle: string | Handle): Promise<Buffer> {
         const id = typeof idOrHandle === 'string' ? idOrHandle : idOrHandle.id;
         console.log(`Loading Block ID: ${id}...`);
-        const resp = await this.socket.request({ Load: { id } });
+        const resp = await this.socket.request({ cmd: 'Load', id });
 
-        if (resp.Loaded) {
-            // data is array of numbers
-            const buf = Buffer.from(resp.Loaded.data);
+        if (resp.res === 'Loaded') {
+            // data is Buffer (msgpackr)
+            const buf = resp.data;
             console.log(`Loaded ${buf.length} bytes.`);
             return buf;
-        } else if (resp.Error) {
-            throw new Error(resp.Error.msg);
+        } else if (resp.res === 'Error') {
+            throw new Error(resp.msg);
         }
-        throw new Error("Unknown response");
+        throw new Error("Unknown response: " + JSON.stringify(resp));
     }
 
     async set(key: string, data: string | Buffer): Promise<Handle> {
         const payload = Buffer.isBuffer(data) ? data : Buffer.from(data);
-        const dataArray = Array.from(payload);
 
         console.log(`Setting '${key}'...`);
-        const resp = await this.socket.request({ Set: { key, data: dataArray } });
+        const resp = await this.socket.request({ cmd: 'Set', key, data: payload });
 
-        if (resp.Stored) {
-            console.log(`Set '${key}' -> ID: ${resp.Stored.id}`);
-            return { id: resp.Stored.id };
-        } else if (resp.Error) {
-            throw new Error(resp.Error.msg);
+        if (resp.res === 'Stored') {
+            console.log(`Set '${key}' -> ID: ${resp.id}`);
+            return { id: resp.id };
+        } else if (resp.res === 'Error') {
+            throw new Error(resp.msg);
         }
-        throw new Error("Unknown response");
+        throw new Error("Unknown response: " + JSON.stringify(resp));
     }
 
     async get(key: string): Promise<Buffer> {
         console.log(`Getting '${key}'...`);
-        const resp = await this.socket.request({ Get: { key } });
+        const resp = await this.socket.request({ cmd: 'Get', key });
 
-        if (resp.Loaded) {
-            const buf = Buffer.from(resp.Loaded.data);
+        if (resp.res === 'Loaded') {
+            const buf = resp.data;
             console.log(`Got '${key}': ${buf.length} bytes.`);
             return buf;
-        } else if (resp.Error) {
-            throw new Error(resp.Error.msg);
+        } else if (resp.res === 'Error') {
+            throw new Error(resp.msg);
         }
-        throw new Error("Unknown response");
+        throw new Error("Unknown response: " + JSON.stringify(resp));
     }
 
     async peers(): Promise<string[]> {
         console.log("Listing peers...");
-        const resp = await this.socket.request("ListPeers"); // Enum unit variant might be string "ListPeers" in JSON? 
-        // Rust serde_json enum formatting: 
-        // Unit variant: "ListPeers"
-        // Struct variant: { "Store": ... }
+        const resp = await this.socket.request({ cmd: 'ListPeers' });
 
-        if (resp.List) {
-            return resp.List.items;
-        } else if (resp.Error) {
-            throw new Error(resp.Error.msg);
+        if (resp.res === 'List') {
+            return resp.items;
+        } else if (resp.res === 'Error') {
+            throw new Error(resp.msg);
         }
-        throw new Error("Unknown response");
+        throw new Error("Unknown response: " + JSON.stringify(resp));
     }
 
     async free(id: string): Promise<void> {
         // id is string
-        const resp = await this.socket.request({ Free: { id } });
-        if (resp.Success) {
+        const resp = await this.socket.request({ cmd: 'Free', id });
+        if (resp.res === 'Success') {
             return;
-        } else if (resp.Error) {
-            throw new Error(resp.Error.msg);
+        } else if (resp.res === 'Error') {
+            throw new Error(resp.msg);
         }
-        throw new Error("Unknown response");
+        throw new Error("Unknown response: " + JSON.stringify(resp));
     }
 
     disconnect() {

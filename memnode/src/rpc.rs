@@ -29,6 +29,7 @@ mod string_id {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+#[serde(tag = "cmd")]
 pub enum SdkCommand {
     Store { data: Vec<u8> },
     StoreRemote { data: Vec<u8>, target: Option<String> }, 
@@ -45,6 +46,7 @@ pub enum SdkCommand {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+#[serde(tag = "res")]
 pub enum SdkResponse {
     Stored { #[serde(with = "string_id")] id: BlockId },
     Loaded { data: Vec<u8> },
@@ -134,8 +136,8 @@ where S: AsyncReadExt + AsyncWriteExt + Unpin
         let mut buf = vec![0u8; len];
         stream.read_exact(&mut buf).await?;
 
-        // SWITCH TO JSON
-        let cmd: SdkCommand = serde_json::from_slice(&buf)?;
+        // SWITCH TO MessagePack
+        let cmd: SdkCommand = rmp_serde::from_slice(&buf)?;
         
         let response = match cmd {
             SdkCommand::Store { data } => {
@@ -215,8 +217,8 @@ where S: AsyncReadExt + AsyncWriteExt + Unpin
             }
         };
 
-        // Serialize JSON
-        let resp_bytes = serde_json::to_vec(&response)?;
+        // Serialize MessagePack
+        let resp_bytes = rmp_serde::to_vec(&response)?;
         let resp_len = resp_bytes.len() as u32;
         stream.write_all(&resp_len.to_be_bytes()).await?;
         stream.write_all(&resp_bytes).await?;

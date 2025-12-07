@@ -1,6 +1,6 @@
 {
   "name": "memcloud",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "TypeScript SDK for MemCloud",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -29,7 +29,10 @@
   "author": "Vibhanshu Garg",
   "license": "MIT",
   "devDependencies": {
-    "typescript": "^5.0.0",
-    "@types/node": "^20.0.0"
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "msgpackr": "^1.11.5"
   }
 }

@@ -13,5 +13,8 @@
   "license": "ISC",
   "dependencies": {
     "memcloud": "^0.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1"
   }
 }

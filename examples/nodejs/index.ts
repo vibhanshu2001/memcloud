@@ -18,11 +18,19 @@ async function main() {
     console.log("Peers:", peers);
 
     if (peers.length > 0) {
-        const targetPeer = peers[0]; // Pick first peer
-        console.log(`Attempting to store data on peer: ${targetPeer}`);
+        const targetPeerString = peers[0]; // Pick first peer
+        // Format is: "UUID (Name) @ Addr" - extract UUID
+        const targetPeerId = targetPeerString.split(' ')[0];
+
+        console.log(`Attempting to store data on peer: ${targetPeerString} (ID: ${targetPeerId})`);
         try {
-            const remoteHandle = await cloud.store("Data for neighbor", targetPeer);
+            const remoteHandle = await cloud.store("Data for neighbor", targetPeerId);
             console.log("Remote Stored ID:", remoteHandle.id);
+
+            // Verify retrieval
+            console.log("Reading back remote data...");
+            const remoteData = await cloud.load(remoteHandle.id);
+            console.log("Remote Data:", remoteData.toString());
         } catch (e) {
             console.error("Remote store failed:", e);
         }

@@ -30,6 +30,7 @@ mod string_id {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+#[serde(tag = "cmd")]
 pub enum SdkCommand {
     Store { data: Vec<u8> },
     StoreRemote { data: Vec<u8>, target: Option<String> },
@@ -44,6 +45,7 @@ pub enum SdkCommand {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+#[serde(tag = "res")]
 pub enum SdkResponse {
     Stored { #[serde(with = "string_id")] id: BlockId },
     Loaded { data: Vec<u8> },
@@ -65,7 +67,7 @@ impl MemCloudClient {
 
     async fn send_command(&mut self, cmd: SdkCommand) -> Result<SdkResponse> {
         // Serialize
-        let bytes = serde_json::to_vec(&cmd)?;
+        let bytes = rmp_serde::to_vec(&cmd)?;
         let len = bytes.len() as u32;
 
         // Send
@@ -81,7 +83,7 @@ impl MemCloudClient {
         self.stream.read_exact(&mut resp_buf).await?;
 
         // Deserialize
-        let resp: SdkResponse = serde_json::from_slice(&resp_buf)?;
+        let resp: SdkResponse = rmp_serde::from_slice(&resp_buf)?;
         Ok(resp)
     }
 

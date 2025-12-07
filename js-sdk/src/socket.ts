@@ -1,4 +1,5 @@
 import * as net from 'net';
+import { pack, unpack } from 'msgpackr';
 
 export class MemSocket {
     private client: net.Socket;
@@ -30,8 +31,7 @@ export class MemSocket {
     async request(command: any): Promise<any> {
         return new Promise((resolve, reject) => {
             // Serialize
-            const jsonStr = JSON.stringify(command);
-            const bodyBuffer = Buffer.from(jsonStr, 'utf8');
+            const bodyBuffer = pack(command);
             const lenBuffer = Buffer.alloc(4);
             lenBuffer.writeUInt32BE(bodyBuffer.length, 0);
 
@@ -70,7 +70,7 @@ export class MemSocket {
                         // Simplified SDK: We assume sequential request-response.
 
                         try {
-                            const resp = JSON.parse(body.toString('utf8'));
+                            const resp = unpack(body);
                             resolve(resp);
                         } catch (e) {
                             reject(e);
@@ -78,7 +78,6 @@ export class MemSocket {
                     }
                 }
             };
-
             this.client.on('data', onData);
         });
     }
