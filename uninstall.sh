@@ -78,7 +78,7 @@ fi
 # Ask to remove config directory
 echo ""
 echo "${CYAN}✨ Optional Cleanup:${NC} Remove MemCloud config/state (~/.memcloud)? [y/N]"
-read -r response
+read -r response < /dev/tty
 if [ "$response" = "y" ] || [ "$response" = "Y" ]; then
     rm -rf "$HOME/.memcloud"
     log_info "Config directory wiped. Fresh as new RAM."
