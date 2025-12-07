@@ -4,7 +4,7 @@ use serde::{Serialize, Deserialize};
 use tokio::net::UnixStream;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use anyhow::Result;
-use serde_json;
+
 
 pub type BlockId = u64;
 
@@ -144,7 +144,7 @@ impl MemCloudClient {
         match self.send_command(cmd).await? {
             SdkResponse::PeerList { peers } => Ok(peers),
             // Fallback for older nodes? No versioning yet.
-            SdkResponse::List { items } => {
+            SdkResponse::List { items: _items } => {
                 // mock convert? or error?
                 // Assuming version alignment. 
                 // But if we encounter List, it means old node.

@@ -1,8 +1,8 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800&display=swap');
 
 @layer base {
   :root {
@@ -57,7 +57,9 @@
     font-family: 'Inter', system-ui, sans-serif;
   }
 
-  code, pre, .font-mono {
+  code,
+  pre,
+  .font-mono {
     font-family: 'JetBrains Mono', monospace;
   }
 }
@@ -107,6 +109,7 @@
   from {
     opacity: 0;
   }
+
   to {
     opacity: 1;
   }
@@ -117,6 +120,7 @@
     opacity: 0;
     transform: translateY(20px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -124,9 +128,12 @@
 }
 
 @keyframes pulseGlow {
-  0%, 100% {
+
+  0%,
+  100% {
     box-shadow: 0 0 20px -5px hsl(var(--glow-primary) / 0.3);
   }
+
   50% {
     box-shadow: 0 0 30px -5px hsl(var(--glow-primary) / 0.5);
   }

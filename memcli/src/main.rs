@@ -370,7 +370,7 @@ async fn handle_data_command(cmd: Commands, client: &mut MemCloudClient) -> anyh
             // For now, simple client version is enough.
         }
             // For now, simple client version is enough.
-        }
+
         Commands::Flush { force, peer } => {
             let target_desc = peer.clone().unwrap_or_else(|| "LOCAL node".to_string());
 
@@ -447,17 +447,7 @@ fn print_peers_table(peers: &[memsdk::PeerMetadata]) {
         println!("{}", end);
     };
 
-    // Helper to print row
-    let print_row = |n: &str, a: &str, r: &str| {
-        println!("│ {:<w_node$} │ {:<w_addr$} │ {:<w_ram$} │", 
-            n, a, r, 
-            w_node=w_node - 2, 
-            w_addr=w_addr - 2, 
-            w_ram=w_ram - 2); // -2 for parsing inside padding?
-            // Actually alignment in println is tricky with dynamic width expressions inside format string in older rust 
-            // but {:<width$} works. The width includes the padding spaces if I manually put them.
-            // Let's just use manual spacing or the format string carefully.
-    };
+
     
     // Top
     print_sep("┌", "┬", "┐", "─");
