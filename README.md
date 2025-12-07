@@ -55,6 +55,25 @@ flowchart TD
 - **JS SDK**: A TypeScript SDK for building Node.js applications on top of MemCloud.
 - **CLI**: A powerful command-line interface for interaction and debugging.
 
+## 🆚 Comparison
+
+### Feature Matrix
+| Feature | MemCloud | Redis | Memcached |
+| :--- | :--- | :--- | :--- |
+| **Core Value** | Pools Idle RAM on local machines. | Feature-rich in-memory database. | Simple key-value caching. |
+| **Architecture** | **P2P** / Mesh (mDNS Discovery) | Client-Server | Client-Server |
+| **Data Structures** | Strings (Key-Value) | Strings, Hashes, Lists, Sets, etc. | Strings |
+| **Persistence** | None (Ephemeral Cache) | RDB/AOF (Optional) | None |
+| **Ideal Use Case** | **Shared local dev/ML caching** and task distribution. | Session store, message broker, complex caching. | Simple, high-throughput string caching. |
+
+### Performance Philosophy
+**The Unique Advantage: Local P2P**
+While Redis and Memcached shine as single-instance servers, MemCloud is designed for **distributed local caching**.
+
+**Scenario**: 
+-   **MemCloud**: Client A writes to Node B; Client B reads from Node B. (Simulating team task sharing).
+-   **Advantage**: Latency is bound primarily by your fast local network (LAN) and the lightweight Rust daemon, utilizing idle resources across *all* connected machines rather than contending for a single server instance.
+
 ## Installation
 
 ### Prerequisites
@@ -110,7 +129,11 @@ If mDNS discovery doesn't automatically find peers (e.g. different subnets), use
 ./target/release/memcli store "Sensitive Data" --peer "NodeB"
 
 # Set a Key-Value Pair
-# (CLI support for KV coming soon, currently supported in SDK)
+./target/release/memcli set "app-config" "{\"theme\": \"dark\"}"
+# Output: Set 'app-config' -> {"theme": "dark"} (Block ID: 556677)
+
+# Get a Key-Value Pair
+./target/release/memcli get "app-config"
 ```
 
 **Load Data:**

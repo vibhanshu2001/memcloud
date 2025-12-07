@@ -99,6 +99,35 @@ impl InMemoryBlockManager {
         self.key_index.get(key).map(|v| *v)
     }
 
+    pub async fn get_distributed_key(&self, key: &str) -> Result<Option<Vec<u8>>> {
+        // 1. Try Local
+        if let Some(id) = self.get_named_block_id(key) {
+            if let Ok(Some(block)) = self.get_block_async(id).await {
+                return Ok(Some(block.data));
+            }
+        }
+        
+        // 2. Try Remote Broadcast
+        // info!("Key '{}' not found locally, broadcasting query...", key);
+        
+        // Start waiting
+        let fut = self.peer_manager.wait_for_key(key);
+        
+        // Broadcast
+        self.peer_manager.broadcast_get_key(key).await?;
+        
+        // Wait
+        match fut.await {
+            Ok(data) => {
+                info!("Found key '{}' on a peer!", key);
+                Ok(Some(data))
+            }
+            Err(_) => {
+                Ok(None)
+            }
+        }
+    }
+
     pub async fn get_block_async(&self, id: BlockId) -> Result<Option<Block>> {
          // 1. Try Local
          if let Some(entry) = self.blocks.get(&id) {

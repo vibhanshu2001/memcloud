@@ -40,6 +40,15 @@ enum Commands {
     },
     /// Show memory usage and stats
     Stats,
+    /// Set a key-value pair
+    Set {
+        key: String,
+        value: String,
+    },
+    /// Get a value by key
+    Get {
+        key: String,
+    },
 }
 
 #[tokio::main]
@@ -99,7 +108,21 @@ async fn main() -> anyhow::Result<()> {
             println!("Blocks Stored: {}", blocks);
             println!("Peers Connected: {}", peers);
             println!("Memory Usage: {} bytes", memory);
+            println!("Memory Usage: {} bytes", memory);
             println!("--------------------------------");
+        }
+        Commands::Set { key, value } => {
+            let start = Instant::now();
+            let id = client.set(&key, value.as_bytes()).await?;
+            let duration = start.elapsed();
+            println!("Set '{}' -> {} (Block ID: {}) (took {:?})", key, value, id, duration);
+        }
+        Commands::Get { key } => {
+            let start = Instant::now();
+            let data = client.get(&key).await?;
+            let duration = start.elapsed();
+            let value = String::from_utf8_lossy(&data);
+            println!("Get '{}' -> '{}' (took {:?})", key, value, duration);
         }
     }
 

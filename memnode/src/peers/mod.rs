@@ -22,6 +22,7 @@ pub struct PeerInfo {
 pub struct PeerManager {
     peers: Arc<DashMap<Uuid, PeerInfo>>,
     pending_requests: Arc<DashMap<crate::metadata::BlockId, tokio::sync::broadcast::Sender<Vec<u8>>>>,
+    pending_key_requests: Arc<DashMap<String, tokio::sync::broadcast::Sender<Vec<u8>>>>,
     self_id: Uuid,
     self_name: String,
 }
@@ -31,6 +32,7 @@ impl PeerManager {
         Self {
             peers: Arc::new(DashMap::new()),
             pending_requests: Arc::new(DashMap::new()),
+            pending_key_requests: Arc::new(DashMap::new()),
             self_id,
             self_name,
         }
@@ -232,11 +234,49 @@ impl PeerManager {
     pub fn satisfy_request(&self, block_id: crate::metadata::BlockId, data: Vec<u8>) {
         if let Some(tx) = self.pending_requests.get(&block_id) {
             let _ = tx.send(data);
-             // We can optionally remove the entry, but broadcast allows multiple subscribers. 
-             // Ideally we cleanup.
         }
-        // Cleanup if no receivers?
-        // self.pending_requests.remove(&block_id); // Simple cleanup
+    }
+
+    pub async fn broadcast_get_key(&self, key: &str) -> Result<()> {
+        let msg = Message::GetKey { key: key.to_string() };
+        // Clean iteration to avoid holding lock across await
+        let mut connections = Vec::new();
+        for item in self.peers.iter() {
+            if let Some(conn) = &item.value().connection {
+                connections.push(conn.clone());
+            }
+        }
+
+        for conn in connections {
+            let mut w = conn.lock().await;
+            use crate::net::send_message_locked;
+            // Ignore errors on broadcast
+            let _ = send_message_locked(&mut w, &msg).await;
+        }
+        Ok(())
+    }
+
+    pub async fn wait_for_key(&self, key: &str) -> Result<Vec<u8>> {
+        let tx = self.pending_key_requests.entry(key.to_string()).or_insert_with(|| {
+            let (tx, _) = tokio::sync::broadcast::channel(1);
+            tx
+        }).clone();
+
+        let mut rx = tx.subscribe();
+        
+        // Wait shorter time for keys? Or same 5s?
+        // If multiple peers have it, we take first.
+        match tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv()).await {
+            Ok(Ok(data)) => Ok(data),
+            Ok(Err(e)) => anyhow::bail!("Recv error: {}", e),
+            Err(_) => anyhow::bail!("Timeout waiting for key"),
+        }
+    }
+
+    pub fn satisfy_key_request(&self, key: &str, data: Vec<u8>) {
+        if let Some(tx) = self.pending_key_requests.get(key) {
+             let _ = tx.send(data);
+        }
     }
     pub fn get_self_id(&self) -> Uuid {
         self.self_id

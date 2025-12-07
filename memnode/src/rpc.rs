@@ -165,14 +165,10 @@ where S: AsyncReadExt + AsyncWriteExt + Unpin
                  }
             }
             SdkCommand::Get { key } => {
-                if let Some(id) = block_manager.get_named_block_id(&key) {
-                    match block_manager.get_block_async(id).await {
-                         Ok(Some(block)) => SdkResponse::Loaded { data: block.data },
-                         Ok(None) => SdkResponse::Error { msg: "Block index exists but data missing".to_string() },
-                         Err(e) => SdkResponse::Error { msg: e.to_string() },
-                    }
-                } else {
-                     SdkResponse::Error { msg: "Key not found".to_string() }
+                match block_manager.get_distributed_key(&key).await {
+                    Ok(Some(data)) => SdkResponse::Loaded { data },
+                    Ok(None) => SdkResponse::Error { msg: "Key not found locally or in cluster".to_string() },
+                    Err(e) => SdkResponse::Error { msg: e.to_string() },
                 }
             }
             SdkCommand::Stat => {

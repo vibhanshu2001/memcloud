@@ -25,6 +25,14 @@ pub enum Message {
         id: BlockId,
         data: Option<Vec<u8>>,
     },
+    // Distributed KV
+    GetKey {
+        key: String,
+    },
+    KeyFound {
+        key: String,
+        data: Option<Vec<u8>>,
+    },
     Ack,
 }
 
@@ -189,6 +197,27 @@ pub async fn handle_connection_split(
                  if let Err(e) = block_manager.put_block(block) {
                      error!("Failed to store remote block: {}", e);
                  }
+            }
+            Message::GetKey { key } => {
+                // Check local index
+                let id_opt = block_manager.get_named_block_id(&key);
+                let mut data_opt = None;
+                
+                if let Some(id) = id_opt {
+                    // Try to get data locally (sync or async? we are in async)
+                    if let Ok(Some(block)) = block_manager.get_block(id) {
+                         data_opt = Some(block.data);
+                    }
+                }
+                
+                let resp = Message::KeyFound { key, data: data_opt };
+                let mut w = writer.lock().await;
+                send_message_locked(&mut w, &resp).await?;
+            }
+            Message::KeyFound { key, data } => {
+                if let Some(d) = data {
+                    peer_manager.satisfy_key_request(&key, d);
+                }
             }
             _ => {}
         }
