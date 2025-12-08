@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Play, RotateCcw, ArrowLeft, ArrowRight } from "lucide-react";
+import { Play, RotateCcw, ArrowLeft, ArrowRight, Copy, Check } from "lucide-react";
 
 interface CommandStep {
   command: string;
@@ -51,6 +51,16 @@ const commands: CommandStep[] = [
       '📡 mDNS discovery enabled',
     ],
     delay: 1000,
+  },
+  {
+    command: 'memcli connect 192.168.1.11:8081',
+    output: [
+      '🔗 Initiating connection to 192.168.1.11:8081...',
+      '✅ Connection established!',
+      '📡 Handshake successful (Node ID: UbuntuServer)',
+      '   Latency: 1.2ms | Bandwidth: 1.0 Gbps',
+    ],
+    delay: 1200,
   },
   {
     command: 'memcli peers',
@@ -124,6 +134,7 @@ export const InteractiveTerminal = () => {
   const [visibleLines, setVisibleLines] = useState<string[]>([]);
   const timeoutsRef = useRef<NodeJS.Timeout[]>([]);
   const [isPlaying, setIsPlaying] = useState(true);
+  const [isCopied, setIsCopied] = useState(false);
 
   // Helper to clear all pending timeouts
   const clearAllTimeouts = useCallback(() => {
@@ -399,6 +410,18 @@ export const InteractiveTerminal = () => {
             )}
 
             {/* Run Demo Logic Removed (Auto-Starts) */}
+            <div className="w-[1px] h-3 bg-border/50 ml-1" />
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(commands[currentStep].command);
+                setIsCopied(true);
+                setTimeout(() => setIsCopied(false), 2000);
+              }}
+              className="p-1 hover:bg-muted text-muted-foreground transition-colors rounded-sm ml-1"
+              title="Copy Command"
+            >
+              {isCopied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
+            </button>
           </div>
 
           {/* Windows Controls */}
@@ -415,9 +438,9 @@ export const InteractiveTerminal = () => {
         </div>
       </div>
 
-      {/* Terminal content - Auto Height */}
-      <div className="p-4 font-mono text-sm transition-all duration-300 ease-in-out text-left bg-terminal-bg">
-        <div className="min-h-[200px]">
+      {/* Terminal content - Fixed Height with Scroll */}
+      <div className="h-[450px] overflow-y-auto p-4 font-mono text-sm text-left bg-terminal-bg scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
+        <div>
           <div className="space-y-4">
             {/* Current step content */}
             {currentStep < commands.length && (
