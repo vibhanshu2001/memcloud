@@ -198,7 +198,7 @@ where S: AsyncReadExt + AsyncWriteExt + Unpin
                  }
             }
             SdkCommand::Disconnect { peer_id } => {
-                match block_manager.disconnect_peer(&peer_id) {
+                match block_manager.disconnect_peer(&peer_id).await {
                      Ok(true) => SdkResponse::Success,
                      Ok(false) => SdkResponse::Error { msg: "Peer not found".to_string() },
                      Err(e) => SdkResponse::Error { msg: e.to_string() },

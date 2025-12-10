@@ -76,6 +76,7 @@ pub struct PeerMetadata {
     pub addr: String,
     pub total_memory: u64,
     pub used_memory: u64,
+    pub quota: u64,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

@@ -42,6 +42,7 @@ pub enum Message {
     },
     Ack,
     Flush,
+    Bye,
 }
 
 use std::sync::Arc;
@@ -102,7 +103,7 @@ impl TransportServer {
                                  
                                  let writer_arc = Arc::new(tokio::sync::Mutex::new(secure_writer));
                                  
-                                 pm.register_authenticated_peer(session.peer_id, addr, session.peer_name, writer_arc.clone(), session.peer_quota, session.peer_total_memory);
+                                 pm.register_authenticated_peer(session.peer_id, addr, session.peer_name, writer_arc.clone(), my_quota, session.peer_total_memory, session.peer_quota);
                                  
                                  if let Err(e) = handle_connection_split(secure_reader, writer_arc, addr, session.peer_id, bm, pm).await {
                                      error!("Connection error from {}: {}", addr, e);
@@ -218,16 +219,23 @@ pub async fn handle_connection_split(
                         info!("Received quota update from {}: {} bytes", peer_id, quota);
                         peer_manager.update_peer_ram_quota(peer_id, quota);
                     }
+                    Message::Bye => {
+                        info!("Peer {} disconnected gracefully.", peer_id);
+                        break;
+                    }
                     _ => {}
                 }
             }
             Err(e) => {
                 // Connection closed or error
-                 error!("Read error from {}: {}", addr, e);
+                 error!("Read error from {}: {} (Disconnecting)", addr, e);
                  break;
             }
         }
     }
+    
+    // Cleanup on disconnect (graceful or error)
+    peer_manager.handle_peer_disconnect(peer_id);
     Ok(())
 }
 

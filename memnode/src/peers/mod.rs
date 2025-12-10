@@ -21,7 +21,9 @@ pub struct PeerInfo {
     pub name: String,
     pub total_memory: u64,
     pub used_memory: u64,
-    pub ram_quota: u64,
+    pub ram_quota: u64, // What they can store on US
+    pub remote_chunk_size: u64, // Future use?
+    pub remote_quota: u64, // What WE can store on THEM
     pub remote_used_storage: u64,
     pub connection: Option<Arc<tokio::sync::Mutex<SecureWriter>>>, 
 }
@@ -33,6 +35,7 @@ pub struct PeerMetadata {
     pub addr: String,
     pub total_memory: u64,
     pub used_memory: u64,
+    pub quota: u64, // Remote quota available to us
 }
 
 pub struct PeerManager {
@@ -75,6 +78,7 @@ impl PeerManager {
                  addr: entry.value().addr.to_string(),
                  total_memory: entry.value().total_memory,
                  used_memory: entry.value().used_memory,
+                 quota: entry.value().remote_quota,
              });
         }
 
@@ -89,6 +93,7 @@ impl PeerManager {
                     addr: entry.value().addr.to_string(),
                     total_memory: entry.value().total_memory,
                     used_memory: entry.value().used_memory,
+                    quota: entry.value().remote_quota,
                 });
             }
         }
@@ -122,6 +127,8 @@ impl PeerManager {
                             total_memory: session.peer_total_memory, 
                             used_memory: 0,
                             ram_quota, 
+                            remote_chunk_size: 0,
+                            remote_quota: session.peer_quota,
                             remote_used_storage: 0,
                             connection: Some(writer_arc.clone()),
                         };
@@ -141,7 +148,8 @@ impl PeerManager {
                             name: session.peer_name,
                             addr: addr.to_string(),
                             total_memory: session.peer_total_memory,
-                            used_memory: 0
+                            used_memory: 0,
+                            quota: session.peer_quota,
                         })
                     }
                     Err(e) => {
@@ -166,7 +174,7 @@ impl PeerManager {
     }
     
     // Call from TransportServer after accepting an incoming authenticated connection
-    pub fn register_authenticated_peer(&self, id: Uuid, addr: SocketAddr, name: String, connection: Arc<tokio::sync::Mutex<SecureWriter>>, quota: u64, total_memory: u64) {
+    pub fn register_authenticated_peer(&self, id: Uuid, addr: SocketAddr, name: String, connection: Arc<tokio::sync::Mutex<SecureWriter>>, quota: u64, total_memory: u64, remote_quota: u64) {
          let info = PeerInfo {
              id, 
              addr,
@@ -174,15 +182,37 @@ impl PeerManager {
               total_memory,
               used_memory: 0,
               ram_quota: quota, 
+              remote_chunk_size: 0,
+              remote_quota,
               remote_used_storage: 0,
               connection: Some(connection)
          };
          self.peers.insert(id, info);
     }
 
-    pub fn disconnect_peer(&self, peer_id: Uuid) -> bool {
+    pub fn handle_peer_disconnect(&self, peer_id: Uuid) {
         if self.peers.remove(&peer_id).is_some() {
-            info!("Disconnected peer {}", peer_id);
+             info!("Removed peer {} from registry (connection closed).", peer_id);
+        }
+    }
+
+    pub async fn disconnect_peer(&self, peer_id: Uuid) -> bool {
+        // Try to send Bye
+        if let Some(peer) = self.peers.get(&peer_id) {
+             if let Some(conn) = &peer.connection {
+                 info!("Sending Bye to {}", peer_id);
+                 let msg = Message::Bye;
+                 if let Ok(data) = bincode::serialize(&msg) {
+                     // We need to lock.
+                     // Note: if handler is reading, writing should be fine (split).
+                     let mut writer = conn.lock().await;
+                     let _ = writer.send_frame(&data).await;
+                 }
+             }
+        }
+        
+        if self.peers.remove(&peer_id).is_some() {
+            info!("Disconnected peer {} manually.", peer_id);
             true
         } else {
             warn!("Attempted to disconnect unknown peer {}", peer_id);
@@ -340,6 +370,7 @@ impl PeerManager {
             addr: e.value().addr.to_string(),
             total_memory: e.value().total_memory,
             used_memory: e.value().used_memory,
+            quota: e.value().remote_quota,
         }).collect()
     }
     
