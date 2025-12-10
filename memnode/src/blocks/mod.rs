@@ -31,18 +31,20 @@ pub struct InMemoryBlockManager {
     remote_locations: Arc<DashMap<BlockId, uuid::Uuid>>,
     // Track total memory usage in bytes
     current_memory: Arc<AtomicU64>,
+    max_memory: u64,
     // Streaming partial uploads
     active_uploads: Arc<DashMap<u64, Vec<u8>>>,
 }
 
 impl InMemoryBlockManager {
-    pub fn new(peer_manager: Arc<PeerManager>) -> Self {
+    pub fn new(peer_manager: Arc<PeerManager>, max_memory: u64) -> Self {
         Self {
             blocks: Arc::new(DashMap::new()),
             key_index: Arc::new(DashMap::new()),
             peer_manager,
             remote_locations: Arc::new(DashMap::new()),
             current_memory: Arc::new(AtomicU64::new(0)),
+            max_memory,
             active_uploads: Arc::new(DashMap::new()),
         }
     }
@@ -90,8 +92,22 @@ impl InMemoryBlockManager {
         self.peer_manager.get_peer_metadata_list()
     }
 
-    pub async fn connect_peer(&self, addr: &str, block_manager: Arc<InMemoryBlockManager>) -> Result<()> {
-        self.peer_manager.manual_connect(addr, block_manager, self.peer_manager.clone()).await
+    pub async fn connect_peer(&self, addr: &str, block_manager: Arc<InMemoryBlockManager>, quota: u64) -> Result<()> {
+        self.peer_manager.manual_connect(addr, block_manager, self.peer_manager.clone(), quota).await
+    }
+
+    pub async fn update_peer_quota(&self, target: &str, quota: u64) -> Result<()> {
+        let peer_id = if let Ok(uid) = uuid::Uuid::parse_str(target) {
+             Some(uid)
+        } else {
+             self.peer_manager.get_peer_id_by_name(target)
+        };
+
+        if let Some(id) = peer_id {
+             self.peer_manager.set_allowed_quota(id, quota).await
+        } else {
+             anyhow::bail!("Peer '{}' not found", target)
+        }
     }
 
     pub fn put_named_block(&self, key: String, block: Block) -> Result<()> {
@@ -237,6 +253,10 @@ impl InMemoryBlockManager {
         } else {
             anyhow::bail!("Peer '{}' not found", target);
         }
+    }
+
+    pub fn get_max_memory(&self) -> u64 {
+        self.max_memory
     }
 }
 

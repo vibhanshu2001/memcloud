@@ -219,17 +219,44 @@ enum Message {
 
 ---
 
-## Security Considerations
+## 🔒 Security & Authentication
 
-> ⚠️ **Current Status: Development/LAN Only**
+MemCloud implements a custom **Mutual Authentication (mTLS-like)** protocol over TCP to ensure:
+*   **Identity**: Nodes verify each other's Ed25519 signatures.
+*   **Confidentiality**: All traffic is encrypted using ChaCha20-Poly1305.
+*   **Forward Secrecy**: Ephemeral X25519 keys are generated for every session.
 
-MemCloud is designed for trusted local networks. Current security model:
+### Authentication Flow (Handshake)
 
-- **No Authentication**: Any device on the LAN can connect
-- **No Encryption**: Data is transmitted in plaintext
-- **No Authorization**: All peers have equal access
+The handshake establishes a shared secret and validates identities before any block data is exchanged.
 
-**Future Roadmap:**
-- [ ] TLS encryption for peer connections
-- [ ] Pre-shared key authentication
-- [ ] Access control lists (ACLs)
+```mermaid
+sequenceDiagram
+    participant A as Node A (Initiator)
+    participant B as Node B (Responder)
+
+    Note over A,B: TCP Connection Established
+
+    par Hello Exchange
+        A->>B: [HELLO] PubKey_A, Nonce_A, Quota_A
+        B->>A: [HELLO] PubKey_B, Nonce_B, Quota_B
+    end
+
+    Note over A,B: Both verify Quotas and store Peer Info
+
+    par Challenge (Prove Identity)
+        A->>B: [CHALLENGE] Signature_A(Nonce_B)
+        B->>A: [CHALLENGE] Signature_B(Nonce_A)
+    end
+    
+    Note over A,B: Both verify signatures against public keys
+
+    par Key Exchange (Forward Secrecy)
+        A->>B: [FINISH] Ephemeral_PubKey_A
+        B->>A: [FINISH] Ephemeral_PubKey_B
+    end
+
+    Note over A,B: Shared Secret Computed (ECDH)
+
+    Note over A,B: 🔒 Secure Session Established (ChaCha20-Poly1305)
+```

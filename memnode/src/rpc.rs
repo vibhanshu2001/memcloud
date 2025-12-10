@@ -36,7 +36,8 @@ pub enum SdkCommand {
     Load { #[serde(with = "string_id")] id: BlockId },
     Free { #[serde(with = "string_id")] id: BlockId },
     ListPeers,
-    Connect { addr: String },
+    Connect { addr: String, quota: Option<u64> },
+    UpdatePeerQuota { peer_id: String, quota: u64 },
     // New KV commands
     Set { key: String, #[serde(with = "serde_bytes")] data: Vec<u8> },
     Get { key: String },
@@ -178,11 +179,21 @@ where S: AsyncReadExt + AsyncWriteExt + Unpin
                 let peers = block_manager.get_peer_ext_list();
                 SdkResponse::PeerList { peers }
             }
-            SdkCommand::Connect { addr } => {
-                match block_manager.connect_peer(&addr, block_manager.clone()).await {
+            SdkCommand::Connect { addr, quota } => {
+                match block_manager.connect_peer(&addr, block_manager.clone(), quota.unwrap_or(0)).await {
                     Ok(_) => SdkResponse::Success,
                     Err(e) => SdkResponse::Error { msg: e.to_string() },
                 }
+            }
+            SdkCommand::UpdatePeerQuota { peer_id, quota } => {
+                 if quota > block_manager.get_max_memory() {
+                     SdkResponse::Error { msg: format!("Quota exceeds node memory limit ({})", block_manager.get_max_memory()) }
+                 } else {
+                     match block_manager.update_peer_quota(&peer_id, quota).await {
+                         Ok(_) => SdkResponse::Success,
+                         Err(e) => SdkResponse::Error { msg: e.to_string() },
+                     }
+                 }
             }
             SdkCommand::Set { key, data } => {
                  let id = rand::random::<u64>();

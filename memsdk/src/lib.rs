@@ -6,6 +6,25 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use anyhow::Result;
 
 
+pub fn parse_size(s: &str) -> Result<u64> {
+    let s = s.trim().to_lowercase();
+    if s.is_empty() {
+        return Ok(0);
+    }
+    
+    let (digits, suffix) = s.split_at(s.find(|c: char| !c.is_numeric()).unwrap_or(s.len()));
+    let val: u64 = digits.parse().map_err(|_| anyhow::anyhow!("Invalid number provided"))?;
+    
+    match suffix.trim() {
+        "b" | "" => Ok(val),
+        "kb" | "k" => Ok(val * 1024),
+        "mb" | "m" => Ok(val * 1024 * 1024),
+        "gb" | "g" => Ok(val * 1024 * 1024 * 1024),
+        "tb" | "t" => Ok(val * 1024 * 1024 * 1024 * 1024),
+        _ => anyhow::bail!("Invalid size suffix: {}", suffix),
+    }
+}
+
 pub type BlockId = u64;
 
 // Helper for string serialization
@@ -37,7 +56,8 @@ pub enum SdkCommand {
     Load { #[serde(with = "string_id")] id: BlockId },
     Free { #[serde(with = "string_id")] id: BlockId },
     ListPeers,
-    Connect { addr: String },
+    Connect { addr: String, quota: Option<u64> },
+    UpdatePeerQuota { peer_id: String, quota: u64 },
     Set { key: String, #[serde(with = "serde_bytes")] data: Vec<u8> },
     Get { key: String },
     ListKeys { pattern: String },
@@ -158,14 +178,23 @@ impl MemCloudClient {
         }
     }
 
-    pub async fn connect_peer(&mut self, addr: &str) -> Result<()> {
-         let cmd = SdkCommand::Connect { addr: addr.to_string() };
+    pub async fn connect_peer(&mut self, addr: &str, quota: Option<u64>) -> Result<()> {
+         let cmd = SdkCommand::Connect { addr: addr.to_string(), quota };
          match self.send_command(cmd).await? {
             SdkResponse::Success => Ok(()),
             SdkResponse::Error { msg } => anyhow::bail!(msg),
             _ => anyhow::bail!("Unexpected response"),
         }
     }
+
+    pub async fn update_peer_quota(&mut self, peer_id: &str, quota: u64) -> Result<()> {
+        let cmd = SdkCommand::UpdatePeerQuota { peer_id: peer_id.to_string(), quota };
+        match self.send_command(cmd).await? {
+           SdkResponse::Success => Ok(()),
+           SdkResponse::Error { msg } => anyhow::bail!(msg),
+           _ => anyhow::bail!("Unexpected response"),
+       }
+   }
     
     // KV Methods
     pub async fn set(&mut self, key: &str, data: &[u8]) -> Result<BlockId> {
@@ -235,6 +264,7 @@ impl MemCloudClient {
                 stream_id,
                 chunk_seq: seq,
                 data: buffer[..n].to_vec(),
+            
             };
             
             match self.send_command(chunk_cmd).await? {
@@ -252,5 +282,22 @@ impl MemCloudClient {
             SdkResponse::Error { msg } => anyhow::bail!(msg),
             _ => anyhow::bail!("Unexpected response to StreamFinish"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_size() {
+        assert_eq!(parse_size("100").unwrap(), 100);
+        assert_eq!(parse_size("1b").unwrap(), 1);
+        assert_eq!(parse_size("1kb").unwrap(), 1024);
+        assert_eq!(parse_size("1 kb").unwrap(), 1024);
+        assert_eq!(parse_size("1 MB").unwrap(), 1024 * 1024);
+        assert_eq!(parse_size("1.5gb").is_err(), true);
+        assert_eq!(parse_size("512MB").unwrap(), 512 * 1024 * 1024);
+        assert_eq!(parse_size("0").unwrap(), 0);
     }
 }

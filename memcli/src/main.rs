@@ -65,13 +65,19 @@ enum Commands {
     },
     /// Free a block by ID
     Free {
-        id: String, // Updated to String
+        id: String,
     },
-    /// List connected peers
+    /// Manage peers (list, update, disconnect)
+    Peer {
+        #[command(subcommand)]
+        action: PeerAction,
+    },
     Peers,
-    /// Manually connect to a peer (e.g., 192.168.1.5:8080)
     Connect {
         addr: String,
+        /// Optional: RAM quota to offer (e.g., "512mb", "1gb")
+        #[arg(long)]
+        quota: Option<String>,
     },
     /// Show memory usage and stats
     Stats,
@@ -136,6 +142,16 @@ enum NodeAction {
     Stop,
     /// Check if the node daemon is running
     Status,
+}
+
+#[derive(Subcommand)]
+enum PeerAction {
+    List,
+    Update {
+        id: String,
+        #[arg(long)]
+        quota: String,
+    },
 }
 
 #[tokio::main]
@@ -329,15 +345,24 @@ async fn handle_data_command(cmd: Commands, client: &mut MemCloudClient) -> anyh
             println!("Freed block {} (took {:?})", id, duration);
         }
         Commands::Peers => {
-             let peers = client.list_peers().await?;
-             if peers.is_empty() {
-                 println!("No peers connected.");
-             } else {
-                 print_peers_table(&peers);
-             }
+             handle_peer_list(client).await?;
         }
-        Commands::Connect { addr } => {
-            client.connect_peer(&addr).await?;
+        Commands::Peer { action } => {
+            match action {
+                PeerAction::List => handle_peer_list(client).await?,
+                PeerAction::Update { id, quota } => {
+                    let quota_bytes = memsdk::parse_size(&quota)?;
+                    client.update_peer_quota(&id, quota_bytes).await?;
+                    println!("Updated peer {} quota to {} bytes", id, quota_bytes);
+                }
+            }
+        }
+        Commands::Connect { addr, quota } => {
+            let quota_val = match quota {
+                Some(s) => Some(memsdk::parse_size(&s)?),
+                None => None,
+            };
+            client.connect_peer(&addr, quota_val).await?;
             println!("Connected to {}", addr);
         }
         Commands::Stats => {
@@ -446,6 +471,16 @@ async fn handle_data_command(cmd: Commands, client: &mut MemCloudClient) -> anyh
 
 fn target_peer_string(peer: Option<String>) -> Option<String> {
     peer
+}
+
+async fn handle_peer_list(client: &mut MemCloudClient) -> anyhow::Result<()> {
+     let peers = client.list_peers().await?;
+     if peers.is_empty() {
+         println!("No peers connected.");
+     } else {
+         print_peers_table(&peers);
+     }
+     Ok(())
 }
 
 fn format_bytes(bytes: u64) -> String {

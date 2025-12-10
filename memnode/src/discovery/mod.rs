@@ -16,10 +16,11 @@ pub struct MdnsDiscovery {
     port: u16,
     peer_manager: Arc<PeerManager>,
     block_manager: Arc<InMemoryBlockManager>,
+    default_quota: u64,
 }
 
 impl MdnsDiscovery {
-    pub fn new(node_id: Uuid, port: u16, peer_manager: Arc<PeerManager>, block_manager: Arc<InMemoryBlockManager>) -> Result<Self> {
+    pub fn new(node_id: Uuid, port: u16, peer_manager: Arc<PeerManager>, block_manager: Arc<InMemoryBlockManager>, default_quota: u64) -> Result<Self> {
         let daemon = ServiceDaemon::new().map_err(|e| {
             error!("Failed to create mDNS daemon: {}. Auto-discovery will not work.", e);
             error!("This may be due to: firewall blocking port 5353, another mDNS service running, or network restrictions.");
@@ -33,6 +34,7 @@ impl MdnsDiscovery {
             port,
             peer_manager,
             block_manager,
+            default_quota,
         })
     }
 
@@ -74,6 +76,7 @@ impl MdnsDiscovery {
         let my_id = self.node_id;
         let peer_manager = self.peer_manager.clone();
         let block_manager = self.block_manager.clone();
+        let quota = self.default_quota;
 
         tokio::spawn(async move {
             info!("🔍 mDNS browser started, listening for MemCloud peers...");
@@ -151,7 +154,7 @@ impl MdnsDiscovery {
                         info!("🔗 Discovered peer {} at {}", peer_id, socket_addr);
                         
                         // Attempt to connect
-                        match peer_manager.add_discovered_peer(peer_id, socket_addr, block_manager.clone(), peer_manager.clone()).await {
+                        match peer_manager.add_discovered_peer(peer_id, socket_addr, block_manager.clone(), peer_manager.clone(), quota).await {
                             Ok(_) => {
                                 info!("✅ Successfully connected to discovered peer {}", peer_id);
                             }
@@ -180,4 +183,3 @@ impl MdnsDiscovery {
         Ok(())
     }
 }
-

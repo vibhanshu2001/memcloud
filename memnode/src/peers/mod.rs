@@ -4,13 +4,14 @@ use std::sync::Arc;
 use dashmap::DashMap;
 use tokio::net::TcpStream;
 use crate::net::Message;
-use crate::blocks::BlockManager; // Trait import
-use log::{info, error};
+use crate::blocks::BlockManager;
+use log::{info, error, warn};
 use anyhow::Result;
 use serde::{Serialize, Deserialize};
 
 use tokio::io::BufWriter;
-use tokio::net::tcp::OwnedWriteHalf;
+use crate::net::auth::{Identity, handshake_initiator};
+use crate::net::secure_stream::SecureWriter;
 
 #[derive(Debug, Clone)]
 pub struct PeerInfo {
@@ -20,8 +21,9 @@ pub struct PeerInfo {
     pub name: String,
     pub total_memory: u64,
     pub used_memory: u64,
-    // Buffered Writer for syscall reduction
-    pub connection: Option<Arc<tokio::sync::Mutex<BufWriter<OwnedWriteHalf>>>>, 
+    pub ram_quota: u64,
+    pub remote_used_storage: u64,
+    pub connection: Option<Arc<tokio::sync::Mutex<SecureWriter>>>, 
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -39,22 +41,27 @@ pub struct PeerManager {
     pending_key_requests: Arc<DashMap<String, tokio::sync::broadcast::Sender<Vec<u8>>>>,
     self_id: Uuid,
     self_name: String,
+    identity: Arc<Identity>,
 }
 
 impl PeerManager {
     pub fn new(self_id: Uuid, self_name: String) -> Self {
+        let identity = Arc::new(Identity::new(self_id, self_name.clone()));
         Self {
             peers: Arc::new(DashMap::new()),
             pending_requests: Arc::new(DashMap::new()),
             pending_key_requests: Arc::new(DashMap::new()),
             self_id,
             self_name,
+            identity, // Store identity for handshakes
         }
     }
 
-    // We use stored self_id/name to send Hello
+    pub fn get_identity(&self) -> Arc<Identity> {
+        self.identity.clone()
+    }
     
-    pub async fn add_discovered_peer(&self, id: Uuid, addr: SocketAddr, block_manager: Arc<crate::blocks::InMemoryBlockManager>, peer_manager: Arc<PeerManager>) -> Result<()> {
+    pub async fn add_discovered_peer(&self, id: Uuid, addr: SocketAddr, block_manager: Arc<crate::blocks::InMemoryBlockManager>, peer_manager: Arc<PeerManager>, ram_quota: u64) -> Result<()> {
         if self.peers.contains_key(&id) {
             return Ok(());
         }
@@ -63,59 +70,53 @@ impl PeerManager {
         for entry in self.peers.iter() {
             if entry.value().addr == addr {
                 info!("Already connected to peer at {}", addr);
-                // If it was a temporary ID, we might update it later via Hello, but connection exists.
                 return Ok(());
             }
         }
 
         info!("Connecting to peer {} at {}", id, addr);
         match TcpStream::connect(addr).await {
-            Ok(stream) => {
-                info!("Connected to peer {}", id);
+            Ok(mut stream) => {
+                info!("Connected TCP to {}, starting handshake...", id);
                 
-                use tokio::io::AsyncWriteExt;
-                // Send Hello
-                let hello = Message::Hello {
-                    version: 1,
-                    node_id: self.self_id,
-                    name: self.self_name.clone(),
-                    total_memory: 8 * 1024 * 1024 * 1024, // 8GB Mock
-                    used_memory: block_manager.used_space(),
-                };
-                
-                // Split
-                let (reader, writer) = stream.into_split();
-                
-                // Wrap writer in BufWriter
-                let mut writer = BufWriter::new(writer);
+                match handshake_initiator(&mut stream, &self.identity, ram_quota).await {
+                    Ok(session) => {
+                        info!("Handshake success with {}. Negotiated encryption.", session.peer_name);
+                        
+                        let (reader, writer) = stream.into_split();
+                        
+                        use crate::net::secure_stream::{SecureReader, SecureWriter};
+                        let secure_reader = SecureReader::new(reader, &session.recv_key);
+                        let secure_writer = SecureWriter::from_raw(writer, &session.send_key);
+                        
+                        let writer_arc = Arc::new(tokio::sync::Mutex::new(secure_writer));
 
-                // Manual send hello on writer
-                let bytes = bincode::serialize(&hello)?;
-                let len = bytes.len() as u32;
-                writer.write_all(&len.to_be_bytes()).await?;
-                writer.write_all(&bytes).await?;
-                writer.flush().await?; // Flush initial hello
-
-                let writer_arc = Arc::new(tokio::sync::Mutex::new(writer));
-
-                let peer_info = PeerInfo {
-                    id,
-                    addr,
-                    name: "Unknown".to_string(), 
-                    total_memory: 0,
-                    used_memory: 0,
-                    connection: Some(writer_arc.clone()),
-                };
-                
-                self.peers.insert(id, peer_info);
-                
-                // Spawn Read Loop
-                use crate::net::handle_connection_split;
-                tokio::spawn(async move {
-                    if let Err(e) = handle_connection_split(reader, writer_arc, addr, block_manager, peer_manager).await {
-                        error!("Connection error (outgoing) to {}: {}", addr, e);
+                        let peer_info = PeerInfo {
+                            id,
+                            addr,
+                            name: session.peer_name,
+                            total_memory: 0, 
+                            used_memory: 0,
+                            ram_quota, 
+                            remote_used_storage: 0,
+                            connection: Some(writer_arc.clone()),
+                        };
+                        
+                        self.peers.insert(id, peer_info);
+                        
+                        use crate::net::handle_connection_split;
+                        tokio::spawn(async move {
+                            if let Err(e) = handle_connection_split(secure_reader, writer_arc, addr, id, block_manager, peer_manager).await {
+                                error!("Connection error (outgoing) to {}: {}", addr, e);
+                            }
+                        });
+                        
                     }
-                });
+                    Err(e) => {
+                         error!("Handshake failed with {}: {}", addr, e);
+                         return Err(e);
+                    }
+                }
             }
             Err(e) => {
                 error!("Failed to connect to peer {}: {}", id, e);
@@ -147,8 +148,10 @@ impl PeerManager {
         if let Some(peer) = self.peers.get(&peer_id) {
             if let Some(conn) = &peer.connection {
                 let mut writer = conn.lock().await;
-                use crate::net::send_message_locked;
-                send_message_locked(&mut writer, msg).await?;
+                // Serialize message
+                let data = bincode::serialize(msg)?;
+                // Send Frame
+                writer.send_frame(&data).await?;
                 return Ok(());
             }
         }
@@ -173,96 +176,88 @@ impl PeerManager {
             .collect()
     }
 
-    pub async fn manual_connect(&self, addr_str: &str, block_manager: Arc<crate::blocks::InMemoryBlockManager>, peer_manager: Arc<PeerManager>) -> Result<()> {
+    pub async fn manual_connect(&self, addr_str: &str, block_manager: Arc<crate::blocks::InMemoryBlockManager>, peer_manager: Arc<PeerManager>, ram_quota: u64) -> Result<()> {
         let addr: SocketAddr = addr_str.parse()?;
-        let id = Uuid::new_v4(); // We don't know ID yet, we assume they accept us.
-        // Actually, if we use UUID v4, we might duplicate? 
-        // Ideally we should do a handshake to get their real ID.
-        // But for add_discovered_peer, we usually know ID from mDNS.
-        // Here we just use random ID. When we get their Hello, we might need to update ID in map?
-        // Updating key in DashMap is hard. We might need to remove and re-insert.
-        // For now, let's proceed.
-        self.add_discovered_peer(id, addr, block_manager, peer_manager).await
+        let id_placeholder = Uuid::new_v4(); 
+        self.add_discovered_peer(id_placeholder, addr, block_manager, peer_manager, ram_quota).await
+    }
+    
+    // Call from TransportServer after accepting an incoming authenticated connection
+    pub fn register_authenticated_peer(&self, id: Uuid, addr: SocketAddr, name: String, connection: Arc<tokio::sync::Mutex<SecureWriter>>, quota: u64) {
+         let info = PeerInfo {
+             id, 
+             addr,
+             name,
+              total_memory: 0,
+              used_memory: 0,
+              ram_quota: quota, 
+              remote_used_storage: 0,
+              connection: Some(connection)
+         };
+         self.peers.insert(id, info);
     }
 
-    pub fn handle_hello(&self, real_id: Uuid, name: String, addr: SocketAddr, connection: Arc<tokio::sync::Mutex<BufWriter<tokio::net::tcp::OwnedWriteHalf>>>, total_memory: u64, used_memory: u64) {
-        // 1. Check if we already know this stable ID
-        if let Some(mut peer) = self.peers.get_mut(&real_id) {
-             info!("Received Hello from existing peer {}. Updating name to '{}'", real_id, name);
-             peer.name = name;
-             peer.total_memory = total_memory;
-             peer.used_memory = used_memory;
-             // Update connection if the new one is different/fresher? 
-             // For now, if we are receiving Hello on a connection, that connection is active.
-             // It might be the SAME connection arc if we just spawned it.
-             peer.connection = Some(connection);
-             return;
-        }
-    
-        // 2. Check if we have a temporary entry for this Addr (Manual Connect case)
-        // (Scan all peers... suboptimal but fine for MVP)
-        let mut temp_id: Option<Uuid> = None;
-        
-        // We can't iterate and remove effectively with DashMap easily in one pass if we need the key.
-        // DashMap iter gives references.
-        for entry in self.peers.iter() {
-            if entry.value().addr.ip() == addr.ip() && entry.value().addr.port() == addr.port() {
-                // Found a match by address!
-                temp_id = Some(*entry.key());
-                break;
-            }
-        }
-    
-        if let Some(old_id) = temp_id {
-            // Remove old
-            if let Some((_, _old_info)) = self.peers.remove(&old_id) {
-                info!("Handshake: Upgrading peer {} to real ID {} ('{}')", old_id, real_id, name);
-            }
+    pub fn disconnect_peer(&self, peer_id: Uuid) -> bool {
+        if self.peers.remove(&peer_id).is_some() {
+            info!("Disconnected peer {}", peer_id);
+            true
         } else {
-            info!("Handshake: Registering new incoming peer {} ('{}') from {}", real_id, name, addr);
+            warn!("Attempted to disconnect unknown peer {}", peer_id);
+            false
         }
-        
-        // 3. Insert new / authenticated entry
-        let new_info = PeerInfo {
-            id: real_id,
-            addr,
-            name,
-            total_memory,
-            used_memory,
-            connection: Some(connection),
-        };
-        self.peers.insert(real_id, new_info);
     }
-    // Ideally we need a request-response correlation ID or a channel to wait for the specific response.
-    // For MVP, since we don't have a complex transport with message IDs yet, 
-    // we might need to implement a 'send_and_wait' style or just fire and forget for now (but we need data back).
-    // Let's implement a simple `fetch_block` that opens a NEW short-lived connection just for fetching 
-    // OR we need to upgrade our TransportServer to handle responses.
+
+    pub fn try_reserve_storage(&self, peer_id: Uuid, size: u64) -> bool {
+        if let Some(mut peer) = self.peers.get_mut(&peer_id) {
+            if peer.remote_used_storage + size <= peer.ram_quota {
+                peer.remote_used_storage += size;
+                return true;
+            } else {
+                warn!("Peer {} quota exceeded. Used: {}, Requested: {}, Limit: {}", peer_id, peer.remote_used_storage, size, peer.ram_quota);
+                return false;
+            }
+        }
+        false
+    }
+
+    pub fn update_peer_ram_quota(&self, peer_id: Uuid, remote_quota: u64) {
+         info!("Peer {} updated their quota for us to {} bytes", peer_id, remote_quota);
+    }
+
+    pub async fn set_allowed_quota(&self, peer_id: Uuid, new_quota: u64) -> Result<()> {
+        if let Some(mut peer) = self.peers.get_mut(&peer_id) {
+            info!("Updating allowed quota for peer {} to {} bytes", peer_id, new_quota);
+            peer.ram_quota = new_quota;
+            
+            // Notify peer
+            if let Some(conn) = &peer.connection {
+                let mut writer = conn.lock().await;
+                let msg = Message::UpdateQuota { quota: new_quota };
+                let data = bincode::serialize(&msg)?;
+                writer.send_frame(&data).await?;
+            }
+            Ok(())
+        } else {
+             anyhow::bail!("Peer not found")
+        }
+    }
+
+    pub fn release_storage(&self, peer_id: Uuid, size: u64) {
+        if let Some(mut peer) = self.peers.get_mut(&peer_id) {
+            if peer.remote_used_storage >= size {
+                 peer.remote_used_storage -= size;
+            } else {
+                peer.remote_used_storage = 0;
+            }
+        }
+    }
     
-    // DECISION: To keep it simple and robust without refactoring the whole Transport into an actor model:
-    // We will open a transient connection to fetch the block if the persistent one is busy or doesn't support request/reply easily.
-    // actually, we have a persistent connection. We can send GetBlock. 
-    // But how do we get the reply back to *this* caller?
-    
-    // REFACTORING PLAN:
-    // 1. We need `BlockManager` to be able to "ask" for a block.
-    // 2. The `Transport` receives `BlockData`. It needs to notify `BlockManager` or a pending waiter.
-    // 
-    // COMPROMISE FOR MVP SPEED:
-    // We will use a "RPC-like" blocking call on the existing stream? No, multiple async calls might mix.
-    // Let's use a `DashMap<BlockId, tokio::sync::oneshot::Sender<Vec<u8>>>` in PeerManager/network layer 
-    // to track pending requests!
-    
-    // We'll need to update PeerManager struct first.
-    // For this step, I'll just add the method signature.
     pub async fn request_block(&self, peer_id: Uuid, block_id: crate::metadata::BlockId) -> Result<()> {
         let msg = Message::GetBlock { id: block_id };
         self.send_to_peer(peer_id, &msg).await
     }
 
-    // Call this to start waiting, then call request_block
     pub async fn wait_for_block(&self, block_id: crate::metadata::BlockId) -> Result<Vec<u8>> {
-        // Create a channel if not exists
         let tx = self.pending_requests.entry(block_id).or_insert_with(|| {
             let (tx, _) = tokio::sync::broadcast::channel(1);
             tx
@@ -270,7 +265,6 @@ impl PeerManager {
 
         let mut rx = tx.subscribe();
         
-        // Wait for data (timeout 5s)
         match tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv()).await {
             Ok(Ok(data)) => Ok(data),
             Ok(Err(e)) => anyhow::bail!("Recv error: {}", e),
@@ -286,7 +280,6 @@ impl PeerManager {
 
     pub async fn broadcast_get_key(&self, key: &str) -> Result<()> {
         let msg = Message::GetKey { key: key.to_string() };
-        // Clean iteration to avoid holding lock across await
         let mut connections = Vec::new();
         for item in self.peers.iter() {
             if let Some(conn) = &item.value().connection {
@@ -296,9 +289,9 @@ impl PeerManager {
 
         for conn in connections {
             let mut w = conn.lock().await;
-            use crate::net::send_message_locked;
-            // Ignore errors on broadcast
-            let _ = send_message_locked(&mut w, &msg).await;
+            // Serialize
+            let data = bincode::serialize(&msg)?;
+            let _ = w.send_frame(&data).await;
         }
         Ok(())
     }
@@ -311,8 +304,6 @@ impl PeerManager {
 
         let mut rx = tx.subscribe();
         
-        // Wait shorter time for keys? Or same 5s?
-        // If multiple peers have it, we take first.
         match tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv()).await {
             Ok(Ok(data)) => Ok(data),
             Ok(Err(e)) => anyhow::bail!("Recv error: {}", e),

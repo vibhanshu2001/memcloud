@@ -41,7 +41,7 @@ async fn main() -> anyhow::Result<()> {
     let peer_manager = Arc::new(peers::PeerManager::new(node_id, args.name.clone()));
 
     // 4. Initialize Block Manager
-    let block_manager = Arc::new(blocks::InMemoryBlockManager::new(peer_manager.clone()));
+    let block_manager = Arc::new(blocks::InMemoryBlockManager::new(peer_manager.clone(), args.memory));
 
     // 3. Start RPC Server
     let rpc_server = rpc::RpcServer::new(&args.socket, block_manager.clone());
@@ -60,7 +60,7 @@ async fn main() -> anyhow::Result<()> {
     info!("Starting MemCloud Node {} on port {}", node_id, actual_port);
 
     // 5. Start Discovery (mDNS)
-    let discovery = discovery::MdnsDiscovery::new(node_id, actual_port, peer_manager.clone(), block_manager.clone())?;
+    let discovery = discovery::MdnsDiscovery::new(node_id, actual_port, peer_manager.clone(), block_manager.clone(), args.memory)?;
     discovery.start_advertising()?;
     discovery.start_browsing()?;
 

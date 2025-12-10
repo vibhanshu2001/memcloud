@@ -131,6 +131,17 @@ export class MemCloud {
         throw new Error("Unknown response: " + JSON.stringify(resp));
     }
 
+    async updatePeerQuota(peerId: string, quota: number): Promise<void> {
+        console.log(`Updating quota for peer ${peerId} to ${quota}...`);
+        const resp = await this.socket.request({ cmd: 'UpdatePeerQuota', peer_id: peerId, quota });
+        if (resp.res === 'Success') {
+            return;
+        } else if (resp.res === 'Error') {
+            throw new Error(resp.msg);
+        }
+        throw new Error("Unknown response: " + JSON.stringify(resp));
+    }
+
     async peers(): Promise<string[]> {
         console.log("Listing peers...");
         const resp = await this.socket.request({ cmd: 'ListPeers' });

@@ -12,6 +12,7 @@ import {
   ExternalLink,
   ArrowRight
 } from "lucide-react";
+import { Link } from "react-router-dom";
 import { Terminal } from "@/components/Terminal";
 import { InteractiveTerminal } from "@/components/InteractiveTerminal";
 import { FeatureCard } from "@/components/FeatureCard";
@@ -165,9 +166,19 @@ const Index = () => {
             /> written in Rust
           </p>
 
-          <p className="text-lg text-foreground/80 mb-10 animate-fade-in-delay-2">
+          <p className="text-lg text-foreground/80 mb-8 animate-fade-in-delay-2">
             "Turning nearby devices into your personal RAM farm."
           </p>
+
+          <div className="flex items-center justify-center gap-4 mb-10 animate-fade-in-delay-2">
+            <Link
+              to="/docs/cli"
+              className="group flex items-center gap-2 px-6 py-3 bg-secondary text-secondary-foreground rounded-lg font-medium hover:bg-secondary/80 transition-all hover:scale-105"
+            >
+              Read Documentation
+              <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+            </Link>
+          </div>
 
           <div className="max-w-2xl mx-auto animate-fade-in-delay-3">
             <InteractiveTerminal />
@@ -340,15 +351,13 @@ const Index = () => {
               <Github className="w-5 h-5" />
               View on GitHub
             </a>
-            <a
-              href="https://github.com/vibhanshu2001/memcloud#readme"
-              target="_blank"
-              rel="noopener noreferrer"
+            <Link
+              to="/docs/cli"
               className="flex items-center gap-2 px-6 py-3 bg-secondary text-secondary-foreground rounded-lg font-medium hover:bg-secondary/80 transition-colors"
             >
               Read Documentation
               <ExternalLink className="w-4 h-4" />
-            </a>
+            </Link>
           </div>
         </div>
       </section>

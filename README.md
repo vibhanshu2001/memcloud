@@ -2,7 +2,7 @@
 
 ![Rust](https://img.shields.io/badge/language-rust-orange)
 ![Platform](https://img.shields.io/badge/platform-macos%20%7C%20linux-blue)
-![Status](https://img.shields.io/badge/status-alpha-red)
+![Status](https://img.shields.io/badge/Status-Beta-blue?style=for-the-badge)
 [![NPM](https://img.shields.io/npm/v/memcloud)](https://www.npmjs.com/package/memcloud)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Build Status](https://img.shields.io/github/actions/workflow/status/vibhanshu2001/memcloud/release.yml?label=Release%20Build)](https://github.com/vibhanshu2001/memcloud/actions)
@@ -165,9 +165,26 @@ flowchart TD
 - `js-sdk/` — TypeScript SDK (published as `memcloud` on npm)
 - `installers/` — Systemd/Launchd service files
 
-## 🆚 Comparison
+## 🔒 Security & Authentication
 
-### Feature Matrix
+MemCloud employs a robust **Mutual Authentication (mTLS-like)** protocol to ensure data security on your LAN.
+
+1.  **Identity Keys**: Each node generates a unique Ed25519 identity keypair on first launch.
+2.  **Handshake**: When connecting, nodes perform a 4-way handshake:
+    *   **Hello**: Nodes exchange public keys and nonces.
+    *   **Challenge**: Each node challenges the other to sign a random nonce.
+    *   **Response**: Nodes verify signatures to prove identity ownership.
+    *   **Finish**: An ephemeral X25519 key exchange establishes a shared secret.
+3.  **Encryption**: All traffic is encrypted using **ChaCha20-Poly1305** (AEAD) with forward secrecy.
+
+**Zero-Configuration**: By default, MemCloud uses a Trust-On-First-Use (TOFU) model. No certificates to manage—just run and it works securely.
+
+---
+
+
+
+## ⚖️ Feature Matrix
+
 | Feature | MemCloud | Redis | Memcached |
 | :--- | :--- | :--- | :--- |
 | **Core Value** | Pools Idle RAM on local machines. | Feature-rich in-memory database. | Simple key-value caching. |
@@ -275,6 +292,8 @@ memcli connect <IP_OF_NODE_B>:8081
 
 ### 4. CLI Operations
 
+> **Note**: For a comprehensive command reference, see the [CLI Documentation](https://memcloud.vercel.app/docs/cli).
+
 **Store Data:**
 ```bash
 # Store locally (or auto-distributed)
@@ -302,9 +321,19 @@ memcli keys "*config"    # List ending with 'config'
 memcli load 123456789
 ```
 
-**List Peers:**
+**Peer Operations:**
 ```bash
-memcli peers
+# List all connected peers
+memcli peer list
+
+# Connect with custom RAM quota (e.g., offer only 512MB)
+memcli connect <IP>:8080 --quota "512mb"
+
+# Update an active peer's quota (Live)
+memcli peer update <PEER_ID> --quota "1gb"
+
+# Disconnect from a peer
+memcli peer disconnect <PEER_ID>
 ```
 
 **Show Stats:**
