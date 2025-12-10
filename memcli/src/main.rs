@@ -524,31 +524,29 @@ fn format_bytes(bytes: u64) -> String {
 
 fn print_peers_table(peers: &[memsdk::PeerMetadata]) {
     // 1. Calculate column widths
-    // Header
     let h_node = "Node";
     let h_addr = "Address";
-    let h_quota = "Quota";
-    let h_total = "System RAM";
+    let h_in = "Allowed (In)";
+    let h_out = "Pool (Out)";
     
-    // Min widths
     let mut w_node = h_node.len();
     let mut w_addr = h_addr.len();
-    let mut w_quota = h_quota.len();
-    let mut w_total = h_total.len();
+    let mut w_in = h_in.len();
+    let mut w_out = h_out.len();
 
     // Scan data
     for p in peers {
         w_node = w_node.max(p.name.len());
         w_addr = w_addr.max(p.addr.len());
-        w_quota = w_quota.max(format_bytes(p.quota).len());
-        w_total = w_total.max(format_bytes(p.total_memory).len());
+        w_in = w_in.max(format_bytes(p.allowed_quota).len());
+        w_out = w_out.max(format_bytes(p.quota).len());
     }
 
     // Padding
     w_node += 2; 
     w_addr += 2;
-    w_quota += 2;
-    w_total += 2;
+    w_in += 2;
+    w_out += 2;
 
     // Helper to print separator
     let print_sep = |start: &str, mid: &str, end: &str, line: &str| {
@@ -557,21 +555,19 @@ fn print_peers_table(peers: &[memsdk::PeerMetadata]) {
         print!("{}", mid);
         print!("{}", line.repeat(w_addr));
         print!("{}", mid);
-        print!("{}", line.repeat(w_quota));
+        print!("{}", line.repeat(w_in));
         print!("{}", mid);
-        print!("{}", line.repeat(w_total));
+        print!("{}", line.repeat(w_out));
         println!("{}", end);
     };
 
-
-    
     // Top
     print_sep("┌", "┬", "┐", "─");
 
     // Header
-    println!("│ {:<width_n$} │ {:<width_a$} │ {:<width_q$} │ {:<width_t$} │", 
-             h_node, h_addr, h_quota, h_total,
-             width_n = w_node-2, width_a = w_addr-2, width_q = w_quota-2, width_t = w_total-2);
+    println!("│ {:<width_n$} │ {:<width_a$} │ {:<width_i$} │ {:<width_o$} │", 
+             h_node, h_addr, h_in, h_out,
+             width_n = w_node-2, width_a = w_addr-2, width_i = w_in-2, width_o = w_out-2);
 
     // Mid
     print_sep("├", "┼", "┤", "─");
@@ -579,17 +575,17 @@ fn print_peers_table(peers: &[memsdk::PeerMetadata]) {
     // Rows
     let mut total_pooled = 0;
     for p in peers {
-        let quota = format_bytes(p.quota);
-        let total = format_bytes(p.total_memory);
+        let q_in = format_bytes(p.allowed_quota);
+        let q_out = format_bytes(p.quota);
         total_pooled += p.quota;
         
-        println!("│ {:<width_n$} │ {:<width_a$} │ {:<width_q$} │ {:<width_t$} │", 
-                 p.name, p.addr, quota, total,
-                 width_n = w_node-2, width_a = w_addr-2, width_q = w_quota-2, width_t = w_total-2);
+        println!("│ {:<width_n$} │ {:<width_a$} │ {:<width_i$} │ {:<width_o$} │", 
+                 p.name, p.addr, q_in, q_out,
+                 width_n = w_node-2, width_a = w_addr-2, width_i = w_in-2, width_o = w_out-2);
     }
 
     // Bottom
     print_sep("└", "┴", "┘", "─");
 
-    println!("\n📊 Total Pooled RAM: {}", format_bytes(total_pooled));
+    println!("\n📊 Total Pooled RAM (Outbound): {}", format_bytes(total_pooled));
 }

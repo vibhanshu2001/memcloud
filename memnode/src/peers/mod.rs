@@ -36,6 +36,7 @@ pub struct PeerMetadata {
     pub total_memory: u64,
     pub used_memory: u64,
     pub quota: u64, // Remote quota available to us
+    pub allowed_quota: u64, // Quota we allow them
 }
 
 pub struct PeerManager {
@@ -79,6 +80,7 @@ impl PeerManager {
                  total_memory: entry.value().total_memory,
                  used_memory: entry.value().used_memory,
                  quota: entry.value().remote_quota,
+                 allowed_quota: entry.value().ram_quota,
              });
         }
 
@@ -94,6 +96,7 @@ impl PeerManager {
                     total_memory: entry.value().total_memory,
                     used_memory: entry.value().used_memory,
                     quota: entry.value().remote_quota,
+                    allowed_quota: entry.value().ram_quota,
                 });
             }
         }
@@ -150,6 +153,7 @@ impl PeerManager {
                             total_memory: session.peer_total_memory,
                             used_memory: 0,
                             quota: session.peer_quota,
+                            allowed_quota: ram_quota,
                         })
                     }
                     Err(e) => {
@@ -234,7 +238,12 @@ impl PeerManager {
     }
 
     pub fn update_peer_ram_quota(&self, peer_id: Uuid, remote_quota: u64) {
-         info!("Peer {} updated their quota for us to {} bytes", peer_id, remote_quota);
+         if let Some(mut peer) = self.peers.get_mut(&peer_id) {
+             info!("Peer {} updated their quota for us to {} bytes", peer_id, remote_quota);
+             peer.remote_quota = remote_quota;
+         } else {
+             warn!("Received quota update from unknown peer {}", peer_id);
+         }
     }
 
     pub async fn set_allowed_quota(&self, peer_id: Uuid, new_quota: u64) -> Result<()> {
@@ -371,6 +380,7 @@ impl PeerManager {
             total_memory: e.value().total_memory,
             used_memory: e.value().used_memory,
             quota: e.value().remote_quota,
+            allowed_quota: e.value().ram_quota,
         }).collect()
     }
     
