@@ -59,8 +59,8 @@ pub enum SdkCommand {
     Connect { addr: String, quota: Option<u64> },
     UpdatePeerQuota { peer_id: String, quota: u64 },
     Disconnect { peer_id: String },
-    Set { key: String, #[serde(with = "serde_bytes")] data: Vec<u8> },
-    Get { key: String },
+    Set { key: String, #[serde(with = "serde_bytes")] data: Vec<u8>, target: Option<String> },
+    Get { key: String, target: Option<String> },
     ListKeys { pattern: String },
     Stat,
     StreamStart { size_hint: Option<u64> },
@@ -210,8 +210,8 @@ impl MemCloudClient {
    }
     
     // KV Methods
-    pub async fn set(&mut self, key: &str, data: &[u8]) -> Result<BlockId> {
-         let cmd = SdkCommand::Set { key: key.to_string(), data: data.to_vec() };
+    pub async fn set(&mut self, key: &str, data: &[u8], target: Option<String>) -> Result<BlockId> {
+         let cmd = SdkCommand::Set { key: key.to_string(), data: data.to_vec(), target };
          match self.send_command(cmd).await? {
             SdkResponse::Stored { id } => Ok(id),
             SdkResponse::Error { msg } => anyhow::bail!(msg),
@@ -219,8 +219,8 @@ impl MemCloudClient {
         }
     }
     
-    pub async fn get(&mut self, key: &str) -> Result<Vec<u8>> {
-        let cmd = SdkCommand::Get { key: key.to_string() };
+    pub async fn get(&mut self, key: &str, target: Option<String>) -> Result<Vec<u8>> {
+        let cmd = SdkCommand::Get { key: key.to_string(), target };
         match self.send_command(cmd).await? {
             SdkResponse::Loaded { data } => Ok(data),
             SdkResponse::Error { msg } => anyhow::bail!(msg),

@@ -221,42 +221,48 @@ enum Message {
 
 ## 🔒 Security & Authentication
 
-MemCloud implements a custom **Mutual Authentication (mTLS-like)** protocol over TCP to ensure:
-*   **Identity**: Nodes verify each other's Ed25519 signatures.
-*   **Confidentiality**: All traffic is encrypted using ChaCha20-Poly1305.
+MemCloud implements a **Noise-based (XX) Secure Protocol** over TCP.
+
+### Key Features
+*   **Transcript Hashing**: All handshake messages are hashed into a running state (`Transcript`).
+*   **Signature Binding**: Signatures sign the *Transcript Hash*, not just a nonce, preventing parameter tampering (MITM).
+*   **Encrypted Identities**: Identity public keys and names are exchanged only *after* an encrypted tunnel is established via ephemeral keys.
 *   **Forward Secrecy**: Ephemeral X25519 keys are generated for every session.
 
-### Authentication Flow (Handshake)
-
-The handshake establishes a shared secret and validates identities before any block data is exchanged.
+### Authentication Flow (Noise XX)
 
 ```mermaid
 sequenceDiagram
     participant A as Node A (Initiator)
     participant B as Node B (Responder)
 
-    Note over A,B: TCP Connection Established
+    Note over A,B: TCP Connection
 
-    par Hello Exchange
-        A->>B: [HELLO] PubKey_A, Nonce_A, Quota_A
-        B->>A: [HELLO] PubKey_B, Nonce_B, Quota_B
+    rect rgb(20, 20, 20)
+    Note right of A: 1. Hello (Cleartext)
+    A->>B: [HELLO] Nonce_A, Ephemeral_Pub_A, Quota
+    Note over A,B: Mix Hash(HelloA)
     end
 
-    Note over A,B: Both verify Quotas and store Peer Info
-
-    par Challenge (Prove Identity)
-        A->>B: [CHALLENGE] Signature_A(Nonce_B)
-        B->>A: [CHALLENGE] Signature_B(Nonce_A)
-    end
-    
-    Note over A,B: Both verify signatures against public keys
-
-    par Key Exchange (Forward Secrecy)
-        A->>B: [FINISH] Ephemeral_PubKey_A
-        B->>A: [FINISH] Ephemeral_PubKey_B
+    rect rgb(20, 20, 20)
+    Note right of B: 2. Hello (Cleartext)
+    B->>A: [HELLO] Nonce_B, Ephemeral_Pub_B, Quota
+    Note over A,B: Mix Hash(HelloB)
+    Note over A,B: Derive Handshake Keys (ECDH)
     end
 
-    Note over A,B: Shared Secret Computed (ECDH)
+    rect rgb(0, 40, 0)
+    Note right of A: 3. Auth A (Encrypted)
+    A->>B: Encrypt([AUTH] Identity_A, Signature_A(Transcript))
+    Note over A,B: Mix Hash(AuthA)
+    end
 
-    Note over A,B: 🔒 Secure Session Established (ChaCha20-Poly1305)
+    rect rgb(0, 40, 0)
+    Note right of B: 4. Auth B (Encrypted)
+    B->>A: Encrypt([AUTH] Identity_B, Signature_B(Transcript))
+    Note over A,B: Mix Hash(AuthB)
+    end
+
+    Note over A,B: Derive Traffic Keys (Split Direction)
+    Note over A,B: 🔒 Secure Session Establised
 ```

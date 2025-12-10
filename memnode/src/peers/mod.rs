@@ -43,6 +43,7 @@ pub struct PeerManager {
     peers: Arc<DashMap<Uuid, PeerInfo>>,
     pending_requests: Arc<DashMap<crate::metadata::BlockId, tokio::sync::broadcast::Sender<Vec<u8>>>>,
     pending_key_requests: Arc<DashMap<String, tokio::sync::broadcast::Sender<Vec<u8>>>>,
+    pending_key_writes: Arc<DashMap<String, tokio::sync::broadcast::Sender<crate::metadata::BlockId>>>,
     self_id: Uuid,
     self_name: String,
     identity: Arc<Identity>,
@@ -55,6 +56,7 @@ impl PeerManager {
             peers: Arc::new(DashMap::new()),
             pending_requests: Arc::new(DashMap::new()),
             pending_key_requests: Arc::new(DashMap::new()),
+            pending_key_writes: Arc::new(DashMap::new()),
             self_id,
             self_name,
             identity, // Store identity for handshakes
@@ -338,6 +340,32 @@ impl PeerManager {
              let _ = tx.send(data);
         }
     }
+
+    pub async fn set_key_remote(&self, peer_id: Uuid, key: String, data: Vec<u8>) -> Result<()> {
+        let msg = Message::PutKey { key, data };
+        self.send_to_peer(peer_id, &msg).await
+    }
+
+    pub async fn wait_for_key_store(&self, key: &str) -> Result<crate::metadata::BlockId> {
+        let tx = self.pending_key_writes.entry(key.to_string()).or_insert_with(|| {
+             let (tx, _) = tokio::sync::broadcast::channel(1);
+             tx
+        }).clone();
+        
+        let mut rx = tx.subscribe();
+        match tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv()).await {
+             Ok(Ok(id)) => Ok(id),
+             Ok(Err(e)) => anyhow::bail!("Recv error: {}", e),
+             Err(_) => anyhow::bail!("Timeout waiting for remote key store"),
+        }
+    }
+    
+    pub fn satisfy_key_store(&self, key: &str, id: crate::metadata::BlockId) {
+        if let Some(tx) = self.pending_key_writes.get(key) {
+            let _ = tx.send(id);
+        }
+    }
+
     pub fn get_peer_id_by_name(&self, name: &str) -> Option<Uuid> {
         // Try exact match first
         if let Some(entry) = self.peers.iter().find(|entry| entry.value().name == name) {

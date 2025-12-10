@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod transcript;
 pub mod secure_stream;
 
 use serde::{Serialize, Deserialize};
@@ -36,6 +37,14 @@ pub enum Message {
     KeyFound {
         key: String,
         data: Option<Vec<u8>>,
+    },
+    PutKey {
+        key: String,
+        data: Vec<u8>,
+    },
+    KeyStored {
+        key: String,
+        id: BlockId,
     },
     UpdateQuota {
         quota: u64,
@@ -214,6 +223,31 @@ pub async fn handle_connection_split(
                     Message::Flush => {
                         info!("Received Flush command from authenticated peer. Clearing local memory.");
                         block_manager.flush();
+                    }
+                    Message::PutKey { key, data } => {
+                        let size = data.len() as u64;
+                        if peer_manager.try_reserve_storage(peer_id, size) {
+                             // Use block_manager.set (needs to be exposed or match existing API)
+                             // Assuming block_manager has `set` (it handles SdkCommand::Set)
+                             match block_manager.set(&key, data) { 
+                                  Ok(id) => {
+                                      let resp = Message::KeyStored { key, id };
+                                      let mut w = writer.lock().await;
+                                      if let Err(e) = send_message_locked(&mut w, &resp).await {
+                                           error!("Failed to send KeyStored ack: {}", e);
+                                      }
+                                  }
+                                  Err(e) => {
+                                      peer_manager.release_storage(peer_id, size);
+                                      error!("Failed to set key from peer {}: {}", peer_id, e);
+                                  }
+                             }
+                        } else {
+                             error!("Quota exceeded for PutKey from {}", peer_id);
+                        }
+                    }
+                    Message::KeyStored { key, id } => {
+                        peer_manager.satisfy_key_store(&key, id);
                     }
                     Message::UpdateQuota { quota } => {
                         info!("Received quota update from {}: {} bytes", peer_id, quota);

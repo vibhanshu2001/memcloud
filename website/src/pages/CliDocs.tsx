@@ -270,7 +270,7 @@ const CliDocs = () => {
                         <h3 id="peer-connect" className="text-lg font-semibold mt-8 mb-2 scroll-mt-24">Connect to a Peer</h3>
                         <CommandBlock
                             command='memcli connect <ADDR> --quota "1gb"'
-                            description="Initiate a connection. Omit --quota to use interactive mode. Supports 4-way mTLS-like handshake."
+                            description="Initiate a connection. Omit --quota to use interactive mode. Supports secure Noise-based handshake."
                         />
 
                         <h3 id="peer-list" className="text-lg font-semibold mt-8 mb-2 scroll-mt-24">List Active Peers</h3>
@@ -304,20 +304,20 @@ const CliDocs = () => {
 
                         <h3 id="store-text" className="text-lg font-semibold mt-8 mb-2 scroll-mt-24">Store Text/Bytes</h3>
                         <CommandBlock
-                            command='memcli store "Hello World"'
-                            description="Uploads a string to the cluster. Returns a Block ID that can be used to retrieve it."
+                            command='memcli store "Hello World" --peer <NODE_NAME>'
+                            description="Uploads a string to your local node by default. Use --peer to target a specific node, or --remote to let the cluster decide."
                         />
 
-                        <h3 id="store-kv-set" className="text-lg font-semibold mt-8 mb-2 scroll-mt-24">Key-Value Store</h3>
+                        <h3 id="store-kv-set" className="text-lg font-semibold mt-8 mb-2 scroll-mt-24">Key-Value Set</h3>
                         <CommandBlock
-                            command='memcli set app-config "{\"theme\": \"dark\"}"'
-                            description="Link a block ID to a human-readable key. Subsequent sets overwrite the key."
+                            command='memcli set app-config "{\"theme\": \"dark\"}" --peer <NODE_NAME>'
+                            description="Link a block ID to a human-readable key. Supports --peer to set the key directly on a remote node."
                         />
 
                         <h3 id="store-kv-get" className="text-lg font-semibold mt-8 mb-2 scroll-mt-24">Retrieve Data</h3>
                         <CommandBlock
-                            command='memcli get app-config'
-                            description="Fetch and print the content associated with a key or block ID."
+                            command='memcli get app-config --peer <NODE_NAME>'
+                            description="Fetch data by key. Use --peer to query a specific node, otherwise queries the whole cluster."
                         />
                     </section>
 

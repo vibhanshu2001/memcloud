@@ -167,15 +167,15 @@ flowchart TD
 
 ## 🔒 Security & Authentication
 
-MemCloud employs a robust **Mutual Authentication (mTLS-like)** protocol to ensure data security on your LAN.
+MemCloud employs a **Secure Session Protocol** (inspired by **Noise Protocol XX Pattern**) with **Transcript Hashing** to ensure data security on your LAN.
 
-1.  **Identity Keys**: Each node generates a unique Ed25519 identity keypair on first launch.
-2.  **Handshake**: When connecting, nodes perform a 4-way handshake:
-    *   **Hello**: Nodes exchange public keys and nonces.
-    *   **Challenge**: Each node challenges the other to sign a random nonce.
-    *   **Response**: Nodes verify signatures to prove identity ownership.
-    *   **Finish**: An ephemeral X25519 key exchange establishes a shared secret.
-3.  **Encryption**: All traffic is encrypted using **ChaCha20-Poly1305** (AEAD) with forward secrecy.
+1.  **Identity Keys**: Persistent Ed25519 identity keypair required for all nodes.
+2.  **Handshake (Transcript-Hashed)**:
+    *   **Hello**: Nodes exchange nonces and ephemeral X25519 public keys.
+    *   **Transcript Binding**: Every message is hashed into a running transcript.
+    *   **Auth**: Nodes exchange **encrypted** proofs of identity (Signature of the Transcript).
+    *   **Session**: Traffic keys are derived from the shared secret + transcript hash, ensuring forward secrecy and strong unique session binding.
+3.  **Encryption**: All traffic (including the Auth phase) is encrypted using **ChaCha20-Poly1305** (AEAD).
 
 **Zero-Configuration**: By default, MemCloud uses a Trust-On-First-Use (TOFU) model. No certificates to manage—just run and it works securely.
 

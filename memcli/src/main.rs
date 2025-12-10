@@ -85,10 +85,14 @@ enum Commands {
     Set {
         key: String,
         value: String,
+        #[arg(long)]
+        peer: Option<String>,
     },
     /// Get a value by key
     Get {
         key: String,
+        #[arg(long)]
+        peer: Option<String>,
     },
     /// List keys matching a pattern (default: *)
     Keys {
@@ -381,7 +385,7 @@ async fn handle_data_command(cmd: Commands, client: &mut MemCloudClient) -> anyh
             let meta = client.connect_peer(&addr, Some(quota_val)).await?;
             
             println!("\n✅ Connection established!");
-            println!("🔐 mTLS-like Secure Session Established (ChaCha20-Poly1305)");
+            println!("🔐 Secure Session Established (Noise XX / ChaCha20-Poly1305)");
             println!("\n📡 Handshake successful (Node ID: {})", meta.name);
             
             // Format stats
@@ -398,15 +402,15 @@ async fn handle_data_command(cmd: Commands, client: &mut MemCloudClient) -> anyh
             println!("Memory Usage: {} bytes", memory);
             println!("--------------------------------");
         }
-        Commands::Set { key, value } => {
+        Commands::Set { key, value, peer } => {
             let start = Instant::now();
-            let id = client.set(&key, value.as_bytes()).await?;
+            let id = client.set(&key, value.as_bytes(), peer).await?;
             let duration = start.elapsed();
             println!("Set '{}' -> {} (Block ID: {}) (took {:?})", key, value, id, duration);
         }
-        Commands::Get { key } => {
+        Commands::Get { key, peer } => {
             let start = Instant::now();
-            let data = client.get(&key).await?;
+            let data = client.get(&key, peer).await?;
             let duration = start.elapsed();
             let value = String::from_utf8_lossy(&data);
             println!("Get '{}' -> '{}' (took {:?})", key, value, duration);

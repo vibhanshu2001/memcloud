@@ -57,6 +57,7 @@ const commands: CommandStep[] = [
     output: [
       '🔗 Initiating connection to 192.168.1.11:8081...',
       '✅ Connection established!',
+      '🔐 Secure Session Established (Noise XX / ChaCha20-Poly1305)',
       '📡 Handshake successful (Node ID: UbuntuServer)',
       '   Latency: 1.2ms | Bandwidth: 1.0 Gbps',
     ],

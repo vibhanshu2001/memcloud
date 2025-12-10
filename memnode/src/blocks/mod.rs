@@ -124,6 +124,26 @@ impl InMemoryBlockManager {
         }
     }
 
+    pub async fn get_remote(&self, key: &str, target: &str) -> Result<Option<Vec<u8>>> {
+        let peer_id_opt = if let Ok(uid) = uuid::Uuid::parse_str(target) {
+            Some(uid)
+        } else {
+            self.peer_manager.get_peer_id_by_name(target)
+        };
+
+        if let Some(peer_id) = peer_id_opt {
+             let msg = crate::net::Message::GetKey { key: key.to_string() };
+             self.peer_manager.send_to_peer(peer_id, &msg).await?;
+             // Reuse existing wait logic
+             match self.peer_manager.wait_for_key(key).await {
+                 Ok(data) => Ok(Some(data)),
+                 Err(_) => Ok(None), 
+             }
+        } else {
+             anyhow::bail!("Peer not found: {}", target)
+        }
+    }
+
     pub fn put_named_block(&self, key: String, block: Block) -> Result<()> {
         let id = block.id;
         self.put_block(block)?;
@@ -134,6 +154,29 @@ impl InMemoryBlockManager {
     
     pub fn get_named_block_id(&self, key: &str) -> Option<BlockId> {
         self.key_index.get(key).map(|v| *v)
+    }
+
+    pub fn set(&self, key: &str, data: Vec<u8>) -> Result<BlockId> {
+        let id = rand::random::<u64>();
+        let block = Block { id, data };
+        self.put_named_block(key.to_string(), block)?;
+        Ok(id)
+    }
+
+    pub async fn set_remote(&self, key: &str, data: Vec<u8>, target: &str) -> Result<BlockId> {
+        let peer_id_opt = if let Ok(uid) = uuid::Uuid::parse_str(target) {
+            Some(uid)
+        } else {
+            self.peer_manager.get_peer_id_by_name(target)
+        };
+
+        if let Some(peer_id) = peer_id_opt {
+             self.peer_manager.set_key_remote(peer_id, key.to_string(), data).await?;
+             // Wait for ack
+             self.peer_manager.wait_for_key_store(key).await
+        } else {
+             anyhow::bail!("Peer not found: {}", target)
+        }
     }
 
     pub async fn get_distributed_key(&self, key: &str) -> Result<Option<Vec<u8>>> {

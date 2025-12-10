@@ -7,48 +7,37 @@ use tokio::net::TcpStream;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use uuid::Uuid;
 use crate::peers::PeerMetadata;
+use super::transcript::Transcript;
+use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
+use chacha20poly1305::aead::{Aead, KeyInit};
+
+// --- Wire Messages ---
 
 #[derive(Serialize, Deserialize, Debug)]
 pub enum HandshakeMessage {
-    Hello(AuthHello),
-    Challenge(AuthChallenge),
-    Response(AuthResponse),
-    Finish(AuthFinish),
+    Hello(HandshakeHello),
+    Auth(Vec<u8>), // Encrypted HandshakeAuth
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct AuthHello {
+pub struct HandshakeHello {
     pub version: u16,
-    pub node_id: Uuid,
-    pub pub_key: [u8; 32], // Ed25519
     pub nonce: [u8; 32],
-    pub name: String,
-    pub ram_quota: u64,
+    pub eph_pub: [u8; 32], // X25519
+    pub quota: u64,
     pub total_memory: u64,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct AuthChallenge {
-    pub pub_key: [u8; 32], // Ed25519 (Responder's)
-    pub nonce: [u8; 32],
-    pub challenge: [u8; 32],
+pub struct HandshakeAuth {
     pub node_id: Uuid,
+    pub pub_key: [u8; 32], // Ed25519 Static Identity
     pub name: String,
-    pub ram_quota: u64,
-    pub total_memory: u64,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct AuthResponse {
     #[serde(with = "serde_bytes")]
-    pub signature: [u8; 64],
-    pub eph_pub: [u8; 32], // X25519
+    pub signature: Vec<u8>, // Signature of Transcript
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct AuthFinish {
-    pub eph_pub: [u8; 32], // X25519
-}
+// --- Internal Structs ---
 
 #[derive(Clone)]
 pub struct Identity {
@@ -82,7 +71,7 @@ pub struct Session {
     pub peer_total_memory: u64,
 }
 
-// Handshake Logic
+// --- Handshake Implementation ---
 
 pub async fn handshake_initiator(
     stream: &mut TcpStream,
@@ -90,80 +79,93 @@ pub async fn handshake_initiator(
     ram_quota: u64,
     total_memory: u64,
 ) -> Result<Session> {
-    let mut csprng = OsRng;
-    
-    // 1. Send Hello
-    let nonce_a: [u8; 32] = rand::Rng::gen(&mut csprng);
-    let hello = HandshakeMessage::Hello(AuthHello {
-        version: 1,
-        node_id: identity.node_id,
-        pub_key: identity.public_key().to_bytes(),
-        nonce: nonce_a,
-        name: identity.name.clone(),
-        ram_quota,
-        total_memory,
-    });
-    send_msg(stream, &hello).await?;
+    let mut transcript = Transcript::new("MemCloud-v2");
 
-    // 2. Expect Challenge
-    let challenge_msg = recv_msg(stream).await?;
-    let (nonce_b, challenge, _pub_key_b, peer_id, peer_name, peer_quota, peer_total_memory) = match challenge_msg {
-        HandshakeMessage::Challenge(c) => (c.nonce, c.challenge, c.pub_key, c.node_id, c.name, c.ram_quota, c.total_memory),
-        _ => bail!("Expected AuthChallenge, got {:?}", challenge_msg),
-    };
-
-    // Verify Responder (B)
-    
-    // 3. Send Response
-    // Sign challenge
-    let signature = identity.keypair.sign(&challenge);
-    
-    // Gen Ephemeral
     let eph_secret = EphemeralSecret::random_from_rng(OsRng);
     let eph_pub = XPublicKey::from(&eph_secret);
-    
-    let resp = HandshakeMessage::Response(AuthResponse {
-        signature: signature.to_bytes(),
+    let nonce_a: [u8; 32] = rand::random();
+
+    let hello_a = HandshakeHello {
+        version: 2,
+        nonce: nonce_a,
         eph_pub: *eph_pub.as_bytes(),
-    });
-    send_msg(stream, &resp).await?;
+        quota: ram_quota,
+        total_memory,
+    };
+    send_msg(stream, &HandshakeMessage::Hello(hello_a)).await?;
     
-    // 4. Expect Finish
-    let finish_msg = recv_msg(stream).await?;
-    let eph_pub_b_bytes = match finish_msg {
-        HandshakeMessage::Finish(f) => f.eph_pub,
-        _ => bail!("Expected AuthFinish, got {:?}", finish_msg),
+    let hello_bytes = bincode::serialize(&HandshakeMessage::Hello(HandshakeHello {
+        version: 2, nonce: nonce_a, eph_pub: *eph_pub.as_bytes(), quota: ram_quota, total_memory
+    }))?;
+    transcript.mix("hello_a", &hello_bytes);
+
+    let msg = recv_msg(stream).await?;
+    let (hello_b_bytes, hello_b) = match msg {
+        (b, HandshakeMessage::Hello(h)) => (b, h),
+        (_, m) => bail!("Expected Hello, got {:?}", m),
+    };
+    transcript.mix("hello_b", &hello_b_bytes);
+
+    let eph_pub_b = XPublicKey::from(hello_b.eph_pub);
+    
+    let shared_secret = eph_secret.diffie_hellman(&eph_pub_b);
+    let handshake_key = derive_key("handshake_key", &shared_secret.to_bytes(), &transcript.current_hash());
+    
+    let sig_payload = transcript.current_hash();
+    let signature = identity.keypair.sign(&sig_payload);
+    
+    let auth_a = HandshakeAuth {
+        node_id: identity.node_id,
+        pub_key: identity.public_key().to_bytes(),
+        name: identity.name.clone(),
+        signature: signature.to_bytes().to_vec(),
     };
     
-    let eph_pub_b = XPublicKey::from(eph_pub_b_bytes);
+    let auth_a_bytes = bincode::serialize(&auth_a)?;
+    let cipher = ChaCha20Poly1305::new(Key::from_slice(&handshake_key));
+    let nonce = Nonce::from_slice(&[0u8; 12]);
+    let ciphertext_a = cipher.encrypt(nonce, auth_a_bytes.as_ref())
+        .map_err(|e| anyhow::anyhow!("Encryption failed: {}", e))?;
+        
+    send_msg(stream, &HandshakeMessage::Auth(ciphertext_a.clone())).await?;
     
-    // Derive Shared Secret
-    let shared_secret = eph_secret.diffie_hellman(&eph_pub_b);
-    
-    // Derive Session Keys (KDF)
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(shared_secret.as_bytes());
-    hasher.update(&nonce_a);
-    hasher.update(&nonce_b);
-    let session_key = hasher.finalize(); 
-    
-    let mut hasher_send = blake3::Hasher::new();
-    hasher_send.update(session_key.as_bytes());
-    hasher_send.update(b"initiator_to_responder");
-    let send_key = hasher_send.finalize();
+    let sent_auth_msg_bytes = bincode::serialize(&HandshakeMessage::Auth(ciphertext_a))?;
+    transcript.mix("auth_a", &sent_auth_msg_bytes);
 
-    let mut hasher_recv = blake3::Hasher::new();
-    hasher_recv.update(session_key.as_bytes());
-    hasher_recv.update(b"responder_to_initiator");
-    let recv_key = hasher_recv.finalize();
+    let msg = recv_msg(stream).await?;
+    let (auth_b_msg_bytes, ciphertext_b) = match msg {
+        (b, HandshakeMessage::Auth(c)) => (b, c),
+        (_, m) => bail!("Expected Auth, got {:?}", m),
+    };
     
+    let nonce_b_dec = Nonce::from_slice(&[0,0,0,0,0,0,0,0,0,0,0,1]); 
+    let auth_b_data = cipher.decrypt(nonce_b_dec, ciphertext_b.as_ref())
+         .map_err(|_| anyhow::anyhow!("Decryption of peer auth failed"))?;
+         
+    let auth_b: HandshakeAuth = bincode::deserialize(&auth_b_data)?;
+    
+    let peer_key = VerifyingKey::from_bytes(&auth_b.pub_key)?;
+    
+    if auth_b.signature.len() != 64 {
+        bail!("Invalid signature length");
+    }
+    let peer_signature = Signature::from_bytes(auth_b.signature.as_slice().try_into().unwrap());
+    peer_key.verify(&transcript.current_hash(), &peer_signature)
+        .context("Peer signature verification failed")?;
+
+    transcript.mix("auth_b", &auth_b_msg_bytes);
+
+    let final_hash = transcript.current_hash();
+    let send_key = derive_key("traffic_a", &shared_secret.to_bytes(), &final_hash);
+    let recv_key = derive_key("traffic_b", &shared_secret.to_bytes(), &final_hash);
+
     Ok(Session {
-        send_key: *send_key.as_bytes(),
-        recv_key: *recv_key.as_bytes(),
-        peer_id,
-        peer_name, 
-        peer_quota, 
-        peer_total_memory,
+        send_key, // Initiator (A) sends with Key A
+        recv_key, // Initiator (A) recvs with Key B
+        peer_id: auth_b.node_id,
+        peer_name: auth_b.name,
+        peer_quota: hello_b.quota,
+        peer_total_memory: hello_b.total_memory,
     })
 }
 
@@ -173,83 +175,114 @@ pub async fn handshake_responder(
     ram_quota: u64,
     total_memory: u64,
 ) -> Result<Session> {
-    let mut csprng = OsRng;
+    let mut transcript = Transcript::new("MemCloud-v2");
 
-    // 1. Expect Hello
-    let hello_msg = recv_msg(stream).await?;
-    let (nonce_a, pub_key_a_bytes, peer_id, peer_name, peer_quota, peer_total_memory) = match hello_msg {
-        HandshakeMessage::Hello(h) => (h.nonce, h.pub_key, h.node_id, h.name, h.ram_quota, h.total_memory),
-        _ => bail!("Expected AuthHello, got {:?}", hello_msg),
+    let msg = recv_msg(stream).await?;
+    let (hello_a_bytes, hello_a) = match msg {
+        (b, HandshakeMessage::Hello(h)) => (b, h),
+        (_, m) => bail!("Expected Hello, got {:?}", m),
     };
-    
-    // TODO: Verify A's public key against trusted list
-    let pub_key_a = VerifyingKey::from_bytes(&pub_key_a_bytes)?;
+    transcript.mix("hello_a", &hello_a_bytes);
 
-    // 2. Send Challenge
-    let nonce_b: [u8; 32] = rand::Rng::gen(&mut csprng);
-    let challenge: [u8; 32] = rand::Rng::gen(&mut csprng);
-    
-    let challenge_pkt = HandshakeMessage::Challenge(AuthChallenge {
-        pub_key: identity.public_key().to_bytes(),
-        nonce: nonce_b,
-        challenge,
-        node_id: identity.node_id,
-        name: identity.name.clone(),
-        ram_quota,
-        total_memory,
-    });
-    send_msg(stream, &challenge_pkt).await?;
-    
-    // 3. Expect Response
-    let resp_msg = recv_msg(stream).await?;
-    let (signature_bytes, eph_pub_a_bytes) = match resp_msg {
-        HandshakeMessage::Response(r) => (r.signature, r.eph_pub),
-        _ => bail!("Expected AuthResponse, got {:?}", resp_msg),
-    };
-    
-    let signature = Signature::from_bytes(&signature_bytes);
-    
-    // Verify Signature
-    pub_key_a.verify(&challenge, &signature).context("Invalid signature from peer")?;
-    
-    // 4. Send Finish
+    let eph_pub_a = XPublicKey::from(hello_a.eph_pub);
+
     let eph_secret = EphemeralSecret::random_from_rng(OsRng);
     let eph_pub = XPublicKey::from(&eph_secret);
+    let nonce_b: [u8; 32] = rand::random();
     
-    let finish = HandshakeMessage::Finish(AuthFinish {
+    let hello_b = HandshakeHello {
+        version: 2,
+        nonce: nonce_b,
         eph_pub: *eph_pub.as_bytes(),
-    });
-    send_msg(stream, &finish).await?;
+        quota: ram_quota,
+        total_memory,
+    };
+    send_msg(stream, &HandshakeMessage::Hello(hello_b)).await?;
     
-    // Derive Keys
-    let eph_pub_a = XPublicKey::from(eph_pub_a_bytes);
+    let hello_b_bytes = bincode::serialize(&HandshakeMessage::Hello(HandshakeHello {
+        version: 2, nonce: nonce_b, eph_pub: *eph_pub.as_bytes(), quota: ram_quota, total_memory
+    }))?;
+    transcript.mix("hello_b", &hello_b_bytes);
+
     let shared_secret = eph_secret.diffie_hellman(&eph_pub_a);
+    let handshake_key = derive_key("handshake_key", &shared_secret.to_bytes(), &transcript.current_hash());
+
+    let msg = recv_msg(stream).await?;
+    let (auth_a_msg_bytes, ciphertext_a) = match msg {
+        (b, HandshakeMessage::Auth(c)) => (b, c),
+        (_, m) => bail!("Expected Auth, got {:?}", m),
+    };
     
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(shared_secret.as_bytes());
-    hasher.update(&nonce_a);
-    hasher.update(&nonce_b);
-    let session_key = hasher.finalize();
-
-    // Derive send/recv keys
-    let mut hasher_recv = blake3::Hasher::new();
-    hasher_recv.update(session_key.as_bytes());
-    hasher_recv.update(b"initiator_to_responder");
-    let recv_key = hasher_recv.finalize();
-
-    let mut hasher_send = blake3::Hasher::new();
-    hasher_send.update(session_key.as_bytes());
-    hasher_send.update(b"responder_to_initiator");
-    let send_key = hasher_send.finalize();
-
+    let cipher = ChaCha20Poly1305::new(Key::from_slice(&handshake_key));
+    let nonce_a_dec = Nonce::from_slice(&[0u8; 12]); 
+    let auth_a_data = cipher.decrypt(nonce_a_dec, ciphertext_a.as_ref())
+         .map_err(|_| anyhow::anyhow!("Decryption of peer auth failed"))?;
+    let auth_a: HandshakeAuth = bincode::deserialize(&auth_a_data)?;
+    
+    let peer_key = VerifyingKey::from_bytes(&auth_a.pub_key)?;
+    if auth_a.signature.len() != 64 {
+        bail!("Invalid signature length");
+    }
+    let peer_signature = Signature::from_bytes(auth_a.signature.as_slice().try_into().unwrap());
+    peer_key.verify(&transcript.current_hash(), &peer_signature)
+        .context("Peer signature verification failed")?;
+        
+    transcript.mix("auth_a", &auth_a_msg_bytes);
+    
+    let sig_payload = transcript.current_hash();
+    let signature = identity.keypair.sign(&sig_payload);
+    
+    let auth_b = HandshakeAuth {
+        node_id: identity.node_id,
+        pub_key: identity.public_key().to_bytes(),
+        name: identity.name.clone(),
+        signature: signature.to_bytes().to_vec(),
+    };
+    
+    let auth_b_bytes = bincode::serialize(&auth_b)?;
+    let nonce_b_enc = Nonce::from_slice(&[0,0,0,0,0,0,0,0,0,0,0,1]); // Nonce 1
+    let ciphertext_b = cipher.encrypt(nonce_b_enc, auth_b_bytes.as_ref())
+        .map_err(|e| anyhow::anyhow!("Encryption failed: {}", e))?;
+        
+    send_msg(stream, &HandshakeMessage::Auth(ciphertext_b.clone())).await?;
+    
+    let sent_auth_b_bytes = bincode::serialize(&HandshakeMessage::Auth(ciphertext_b))?;
+    transcript.mix("auth_b", &sent_auth_b_bytes);
+    
+    let final_hash = transcript.current_hash();
+    let send_key = derive_key("traffic_b", &shared_secret.to_bytes(), &final_hash); // B sends on Key B
+    let recv_key = derive_key("traffic_a", &shared_secret.to_bytes(), &final_hash); // B recvs on Key A
+    
     Ok(Session {
-        send_key: *send_key.as_bytes(),
-        recv_key: *recv_key.as_bytes(),
-        peer_id,
-        peer_name,
-        peer_quota,
-        peer_total_memory,
+        send_key,
+        recv_key,
+        peer_id: auth_a.node_id,
+        peer_name: auth_a.name,
+        peer_quota: hello_a.quota,
+        peer_total_memory: hello_a.total_memory,
     })
+}
+
+
+// --- Helpers ---
+
+fn derive_key(label: &str, shared: &[u8], context: &[u8]) -> [u8; 32] {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(shared);
+    hasher.update(context);
+    hasher.update(label.as_bytes());
+    *hasher.finalize().as_bytes()
+}
+
+// Helper that returns raw bytes + deserialized msg for mixing
+async fn recv_msg(stream: &mut TcpStream) -> Result<(Vec<u8>, HandshakeMessage)> {
+    let mut len_buf = [0u8; 4];
+    stream.read_exact(&mut len_buf).await?;
+    let len = u32::from_be_bytes(len_buf) as usize;
+    let mut buf = vec![0u8; len];
+    stream.read_exact(&mut buf).await?;
+    let msg: HandshakeMessage = bincode::deserialize(&buf)?;
+    Ok((buf, msg))
 }
 
 async fn send_msg(stream: &mut TcpStream, msg: &HandshakeMessage) -> Result<()> {
@@ -259,14 +292,4 @@ async fn send_msg(stream: &mut TcpStream, msg: &HandshakeMessage) -> Result<()> 
     stream.write_all(&bytes).await?;
     stream.flush().await?;
     Ok(())
-}
-
-async fn recv_msg(stream: &mut TcpStream) -> Result<HandshakeMessage> {
-    let mut len_buf = [0u8; 4];
-    stream.read_exact(&mut len_buf).await?;
-    let len = u32::from_be_bytes(len_buf) as usize;
-    let mut buf = vec![0u8; len];
-    stream.read_exact(&mut buf).await?;
-    let msg: HandshakeMessage = bincode::deserialize(&buf)?;
-    Ok(msg)
 }

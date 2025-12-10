@@ -40,8 +40,8 @@ pub enum SdkCommand {
     UpdatePeerQuota { peer_id: String, quota: u64 },
     Disconnect { peer_id: String },
     // New KV commands
-    Set { key: String, #[serde(with = "serde_bytes")] data: Vec<u8> },
-    Get { key: String },
+    Set { key: String, #[serde(with = "serde_bytes")] data: Vec<u8>, target: Option<String> },
+    Get { key: String, target: Option<String> },
     /// List keys with pattern (simple glob: *, prefix*, *suffix, *contains*)
     ListKeys { pattern: String },
     Stat,
@@ -204,18 +204,32 @@ where S: AsyncReadExt + AsyncWriteExt + Unpin
                      Err(e) => SdkResponse::Error { msg: e.to_string() },
                 }
             }
-            SdkCommand::Set { key, data } => {
+            SdkCommand::Set { key, data, target } => {
                  let id = rand::random::<u64>();
-                 let block = Block { id, data };
-                 match block_manager.put_named_block(key, block) {
-                     Ok(_) => SdkResponse::Stored { id }, // Or Success? Returning ID is useful.
-                     Err(e) => SdkResponse::Error { msg: e.to_string() },
+                 
+                 if let Some(t) = target {
+                     match block_manager.set_remote(&key, data, &t).await {
+                         Ok(remote_id) => SdkResponse::Stored { id: remote_id },
+                         Err(e) => SdkResponse::Error { msg: e.to_string() },
+                     }
+                 } else {
+                     let block = Block { id, data };
+                     match block_manager.put_named_block(key, block) {
+                         Ok(_) => SdkResponse::Stored { id },
+                         Err(e) => SdkResponse::Error { msg: e.to_string() },
+                     }
                  }
             }
-            SdkCommand::Get { key } => {
-                match block_manager.get_distributed_key(&key).await {
+            SdkCommand::Get { key, target } => {
+                let res = if let Some(t) = target {
+                    block_manager.get_remote(&key, &t).await
+                } else {
+                    block_manager.get_distributed_key(&key).await
+                };
+
+                match res {
                     Ok(Some(data)) => SdkResponse::Loaded { data },
-                    Ok(None) => SdkResponse::Error { msg: "Key not found locally or in cluster".to_string() },
+                    Ok(None) => SdkResponse::Error { msg: "Key not found".to_string() },
                     Err(e) => SdkResponse::Error { msg: e.to_string() },
                 }
             }
