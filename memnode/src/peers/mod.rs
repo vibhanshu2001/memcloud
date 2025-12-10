@@ -299,6 +299,50 @@ impl PeerManager {
              let _ = tx.send(data);
         }
     }
+    pub fn get_peer_id_by_name(&self, name: &str) -> Option<Uuid> {
+        // Try exact match first
+        if let Some(entry) = self.peers.iter().find(|entry| entry.value().name == name) {
+            return Some(*entry.key());
+        }
+        // Try UUID match
+        if let Ok(id) = Uuid::parse_str(name) {
+            if self.peers.contains_key(&id) {
+                return Some(id);
+            }
+        }
+        None
+    }
+
+    pub async fn get_available_peer(&self) -> Option<Uuid> {
+        self.peers.iter().next().map(|e| *e.key())
+    }
+    
+    pub async fn send_to_peer(&self, peer_id: Uuid, msg: &Message) -> Result<()> {
+         if let Some(peer) = self.peers.get(&peer_id) {
+             if let Some(conn) = &peer.connection {
+                 let mut writer = conn.lock().await;
+                 let data = bincode::serialize(msg)?;
+                 writer.send_frame(&data).await?;
+                 return Ok(());
+             }
+         }
+         anyhow::bail!("Peer {} not connected", peer_id)
+    }
+
+    pub fn list_peers(&self) -> Vec<String> {
+         self.peers.iter().map(|e| format!("{} ({}) @ {}", e.key(), e.value().name, e.value().addr)).collect()
+    }
+    
+    pub fn get_peer_metadata_list(&self) -> Vec<PeerMetadata> {
+        self.peers.iter().map(|e| PeerMetadata {
+            id: e.key().to_string(),
+            name: e.value().name.clone(),
+            addr: e.value().addr.to_string(),
+            total_memory: e.value().total_memory,
+            used_memory: e.value().used_memory,
+        }).collect()
+    }
+    
     pub fn get_self_id(&self) -> Uuid {
         self.self_id
     }
