@@ -213,6 +213,21 @@ impl PeerManager {
     
     // Call from TransportServer after accepting an incoming authenticated connection
     pub fn register_authenticated_peer(&self, id: Uuid, addr: SocketAddr, name: String, connection: Arc<tokio::sync::Mutex<SecureWriter>>, quota: u64, total_memory: u64, remote_quota: u64) {
+         let final_remote_quota = if remote_quota == 0 {
+             if let Some(existing) = self.peers.get(&id) {
+                 if existing.remote_quota > 0 {
+                     info!("Persisting existing quota of {} bytes for peer {} (new connection offered 0)", existing.remote_quota, name);
+                     existing.remote_quota
+                 } else {
+                     0
+                 }
+             } else {
+                 0
+             }
+         } else {
+             remote_quota
+         };
+
          let info = PeerInfo {
              id, 
              addr,
@@ -221,7 +236,7 @@ impl PeerManager {
               used_memory: 0,
               ram_quota: quota, 
               remote_chunk_size: 0,
-              remote_quota,
+              remote_quota: final_remote_quota,
               remote_used_storage: 0,
               connection: Some(connection)
          };

@@ -389,16 +389,11 @@ async fn handle_data_command(cmd: Commands, client: &mut MemCloudClient) -> anyh
             }
         }
         Commands::Connect { addr, quota } => {
-            let quota_str = if quota.is_none() {
-                 dialoguer::Input::<String>::new()
-                     .with_prompt("Enter RAM quota to offer (default: 512mb)")
-                     .default("512mb".into())
-                     .interact_text()?
+            let quota_val = if let Some(q) = quota {
+                memsdk::parse_size(&q)?
             } else {
-                quota.unwrap()
+                0 // Default to 0 (Unidirectional access: Initiator writes to Responder, but Responder cannot write to Initiator)
             };
-
-            let quota_val = memsdk::parse_size(&quota_str)?;
             
             println!("🔗 Initiating connection to {}...", addr);
             
