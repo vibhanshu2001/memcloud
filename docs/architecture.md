@@ -238,26 +238,26 @@ sequenceDiagram
 
     Note over A,B: TCP Connection
 
-    rect rgb(20, 20, 20)
+    rect rgb(255, 255, 240)
     Note right of A: 1. Hello (Cleartext)
     A->>B: [HELLO] Nonce_A, Ephemeral_Pub_A, Quota
     Note over A,B: Mix Hash(HelloA)
     end
 
-    rect rgb(20, 20, 20)
+    rect rgb(255, 255, 240)
     Note right of B: 2. Hello (Cleartext)
     B->>A: [HELLO] Nonce_B, Ephemeral_Pub_B, Quota
     Note over A,B: Mix Hash(HelloB)
     Note over A,B: Derive Handshake Keys (ECDH)
     end
 
-    rect rgb(0, 40, 0)
+    rect rgb(230, 255, 230)
     Note right of A: 3. Auth A (Encrypted)
     A->>B: Encrypt([AUTH] Identity_A, Signature_A(Transcript))
     Note over A,B: Mix Hash(AuthA)
     end
 
-    rect rgb(0, 40, 0)
+    rect rgb(230, 255, 230)
     Note right of B: 4. Auth B (Encrypted)
     B->>A: Encrypt([AUTH] Identity_B, Signature_B(Transcript))
     Note over A,B: Mix Hash(AuthB)
