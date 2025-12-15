@@ -29,7 +29,8 @@ const CliDocs = () => {
             title: "Installation",
             icon: Download,
             subItems: [
-                { id: "install-script", title: "Direct Install" },
+                { id: "install-script", title: "Direct Install (Unix)" },
+                { id: "install-windows", title: "Windows Install" },
                 { id: "install-npm", title: "JS SDK" }
             ]
         },
@@ -257,6 +258,13 @@ const CliDocs = () => {
                         <p className="text-sm text-muted-foreground mb-4">Installs the latest release binaries to your system.</p>
                         <CommandBlock
                             command="curl -fsSL https://raw.githubusercontent.com/vibhanshu2001/memcloud/main/install.sh | sh"
+                            description="Downloads and executes the installation script, setting up MemCloud on your machine."
+                        />
+
+                        <h3 id="install-windows" className="text-lg font-semibold mt-8 mb-2 scroll-mt-24">Direct Install (Windows)</h3>
+                        <p className="text-sm text-muted-foreground mb-4">Run this in PowerShell to install.</p>
+                        <CommandBlock
+                            command="irm https://raw.githubusercontent.com/vibhanshu2001/memcloud/main/install.ps1 | iex"
                             description="Downloads and executes the installation script, setting up MemCloud on your machine."
                         />
 

@@ -14,7 +14,6 @@ import {
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Terminal } from "@/components/Terminal";
-import { InteractiveTerminal } from "@/components/InteractiveTerminal";
 import { FeatureCard } from "@/components/FeatureCard";
 import { CodeBlock } from "@/components/CodeBlock";
 import { Badge } from "@/components/Badge";
@@ -38,7 +37,7 @@ const features = [
   {
     icon: Cloud,
     title: "Multi-Device Support",
-    description: "Works seamlessly with macOS, Ubuntu, and other Linux distributions.",
+    description: "Works seamlessly with macOS, Windows, Ubuntu, and other Linux distributions.",
   },
   {
     icon: WifiOff,
@@ -138,7 +137,7 @@ const Index = () => {
       </header>
 
       {/* Hero Section */}
-      <section className="relative z-10 container mx-auto px-4 pt-20 pb-16 md:pt-32 md:pb-24">
+      <section className="relative z-10 container mx-auto px-4 pt-20 pb-8 md:pt-32 md:pb-12">
         <div className="max-w-3xl mx-auto text-center">
           <div className="flex items-center justify-center gap-3 mb-6 animate-fade-in">
             <Badge>
@@ -180,9 +179,7 @@ const Index = () => {
             </Link>
           </div>
 
-          <div className="max-w-2xl mx-auto animate-fade-in-delay-3">
-            <InteractiveTerminal />
-          </div>
+
         </div>
       </section>
 

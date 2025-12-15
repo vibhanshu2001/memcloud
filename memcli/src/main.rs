@@ -4,9 +4,15 @@ use std::time::Instant;
 use std::fs;
 use std::process::{Command, Stdio};
 use std::path::PathBuf;
-use nix::sys::signal::{self, Signal};
-use nix::unistd::Pid;
 use std::io::{self, Write};
+
+#[cfg(unix)]
+use nix::sys::signal::{self, Signal};
+#[cfg(unix)]
+use nix::unistd::Pid;
+
+#[cfg(windows)]
+use sysinfo::{System, Pid as SysPid};
 
 fn get_memcloud_dir() -> PathBuf {
     let home = dirs::home_dir().expect("Could not find home directory");
@@ -28,8 +34,34 @@ fn read_pid() -> Option<i32> {
 }
 
 fn is_process_running(pid: i32) -> bool {
-    // Check if process exists by sending signal 0
-    signal::kill(Pid::from_raw(pid), None).is_ok()
+    #[cfg(unix)]
+    {
+        // Check if process exists by sending signal 0
+        signal::kill(Pid::from_raw(pid), None).is_ok()
+    }
+    #[cfg(windows)]
+    {
+        let mut sys = System::new_all();
+        sys.refresh_processes();
+        sys.process(SysPid::from(pid as usize)).is_some()
+    }
+}
+
+fn kill_process(pid: i32) -> anyhow::Result<()> {
+    #[cfg(unix)]
+    {
+        signal::kill(Pid::from_raw(pid), Signal::SIGTERM)?;
+        Ok(())
+    }
+    #[cfg(windows)]
+    {
+        let mut sys = System::new_all();
+        sys.refresh_processes();
+        if let Some(process) = sys.process(SysPid::from(pid as usize)) {
+             process.kill();
+        }
+        Ok(())
+    }
 }
 
 #[derive(Parser)]
@@ -304,7 +336,7 @@ fn handle_node_action(action: NodeAction) -> anyhow::Result<()> {
             if let Some(pid) = read_pid() {
                 if is_process_running(pid) {
                     println!("🛑 Stopping MemCloud node (PID: {})...", pid);
-                    signal::kill(Pid::from_raw(pid), Signal::SIGTERM)?;
+                    kill_process(pid)?;
                     let _ = fs::remove_file(&pid_file);
                     println!("✅ Node stopped.");
                 } else {

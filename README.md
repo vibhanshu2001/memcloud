@@ -240,6 +240,12 @@ curl -fsSL https://raw.githubusercontent.com/vibhanshu2001/memcloud/main/install
 ```
 This will download the latest binary for your architecture and install it to `/usr/local/bin`.
 
+### Quick Install (Windows)
+Run this in PowerShell:
+```powershell
+irm https://raw.githubusercontent.com/vibhanshu2001/memcloud/main/install.ps1 | iex
+```
+
 
 ### Build from Source
 ```bash
