@@ -1,4 +1,5 @@
 use serde::{Serialize, Deserialize};
+#[cfg(unix)]
 use tokio::net::{UnixListener, UnixStream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use anyhow::Result;
@@ -115,6 +116,7 @@ impl RpcServer {
         }
     }
 
+    #[cfg(unix)]
     pub async fn run(&self) -> Result<()> {
         let unix_listener = UnixListener::bind(&self.socket_path)?;
         let tcp_listener = tokio::net::TcpListener::bind("127.0.0.1:7070").await?;
@@ -141,8 +143,6 @@ impl RpcServer {
                         Ok((stream, _)) => {
                             let bm = self.block_manager.clone();
                             tokio::spawn(async move {
-                                // Re-use generic handler or specific?
-                                // Let's use generic stream wrapper or just dup code for now to avoid refactor complexity
                                 if let Err(e) = handle_client_tcp(stream, bm).await {
                                      error!("RPC Client error (TCP): {}", e);
                                 }
@@ -151,6 +151,26 @@ impl RpcServer {
                          Err(e) => error!("TCP Accept Error: {}", e),
                     }
                 }
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    pub async fn run(&self) -> Result<()> {
+        let tcp_listener = tokio::net::TcpListener::bind("127.0.0.1:7070").await?;
+        info!("RPC Server listening on 127.0.0.1:7070 (JSON)");
+
+        loop {
+            match tcp_listener.accept().await {
+                Ok((stream, _)) => {
+                    let bm = self.block_manager.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = handle_client_tcp(stream, bm).await {
+                                error!("RPC Client error (TCP): {}", e);
+                        }
+                    });
+                }
+                Err(e) => error!("TCP Accept Error: {}", e),
             }
         }
     }
@@ -421,6 +441,7 @@ where S: AsyncReadExt + AsyncWriteExt + Unpin
     Ok(())
 }
 
+#[cfg(unix)]
 async fn handle_client_unix(stream: UnixStream, bm: Arc<InMemoryBlockManager>) -> Result<()> {
     handle_generic_stream(stream, bm).await
 }

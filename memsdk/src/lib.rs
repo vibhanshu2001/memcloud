@@ -1,7 +1,10 @@
 pub mod c_api;
 
 use serde::{Serialize, Deserialize};
+#[cfg(unix)]
 use tokio::net::UnixStream;
+#[cfg(windows)]
+use tokio::net::TcpStream;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use anyhow::Result;
 
@@ -121,13 +124,25 @@ pub enum SdkResponse {
     ConnectionStatus { state: String, msg: Option<String> },
 }
 
+#[cfg(unix)]
+type InnerStream = UnixStream;
+#[cfg(windows)]
+type InnerStream = TcpStream;
+
 pub struct MemCloudClient {
-    stream: UnixStream,
+    stream: InnerStream,
 }
 
 impl MemCloudClient {
+    #[cfg(unix)]
     pub async fn connect() -> Result<Self> {
         let stream = UnixStream::connect("/tmp/memcloud.sock").await?;
+        Ok(Self { stream })
+    }
+
+    #[cfg(windows)]
+    pub async fn connect() -> Result<Self> {
+        let stream = TcpStream::connect("127.0.0.1:7070").await?;
         Ok(Self { stream })
     }
 

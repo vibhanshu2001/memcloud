@@ -12,15 +12,16 @@ dialoguer = "0.10"
 console = "0.15"
 log = { workspace = true }
 env_logger = { workspace = true }
+dirs = "5.0"
+
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.29", features = ["signal", "process"] }
 
 [target.'cfg(windows)'.dependencies]
 sysinfo = "0.30"
-dirs = "5.0"
 
 [package.metadata.deb]
-maintainer = "Vibhanshu Garg <vibhanshu@example.com>"
+maintainer = "Vibhanshu Garg <v2001.garg@gmail.com>"
 copyright = "2024, Vibhanshu Garg"
 depends = "$auto"
 section = "utils"
