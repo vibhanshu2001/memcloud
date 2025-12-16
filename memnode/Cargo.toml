@@ -28,6 +28,7 @@ blake3 = "1.5"
 sys-info = "0.9"
 hex = "0.4"
 dirs = "5.0"
+memsdk = { path = "../memsdk" }
 
 [package.metadata.deb]
 maintainer = "Vibhanshu Garg <v2001.garg@gmail.com>"

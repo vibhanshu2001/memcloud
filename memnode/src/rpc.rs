@@ -8,96 +8,8 @@ use std::sync::Arc;
 use crate::blocks::{BlockManager, Block, InMemoryBlockManager}; // Need concrete type for async method or cast
 use crate::metadata::BlockId;
 
-// Helper for string serialization of BlockId to safe-guard against JS/JSON precision loss
-mod string_id {
-    use serde::{Deserialize, Deserializer, Serializer};
-    use crate::metadata::BlockId;
-
-    pub fn serialize<S>(id: &BlockId, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_str(&id.to_string())
-    }
-
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<BlockId, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let s = String::deserialize(deserializer)?;
-        s.parse().map_err(serde::de::Error::custom)
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-#[serde(tag = "cmd")]
-pub enum SdkCommand {
-    Store { #[serde(with = "serde_bytes")] data: Vec<u8> },
-    StoreRemote { #[serde(with = "serde_bytes")] data: Vec<u8>, target: Option<String> }, 
-    Load { #[serde(with = "string_id")] id: BlockId },
-    Free { #[serde(with = "string_id")] id: BlockId },
-    ListPeers,
-    Connect { addr: String, quota: Option<u64> },
-    UpdatePeerQuota { peer_id: String, quota: u64 },
-    Disconnect { peer_id: String },
-    // New KV commands
-    Set { key: String, #[serde(with = "serde_bytes")] data: Vec<u8>, target: Option<String> },
-    Get { key: String, target: Option<String> },
-    ListKeys { pattern: String },
-    Stat,
-    // Polling
-    PollConnection { addr: String },
-    // Streaming Commands
-    StreamStart { size_hint: Option<u64> },
-    StreamChunk { stream_id: u64, chunk_seq: u32, #[serde(with = "serde_bytes")] data: Vec<u8> },
-    StreamFinish { stream_id: u64, target: Option<String> },
-    Flush { target: Option<String> },
-    // Trust & Consent
-    TrustList,
-    TrustRemove { key_or_name: String },
-    ConsentList,
-    ConsentApprove { session_id: String, trust_always: bool },
-    ConsentDeny { session_id: String },
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct TrustedDevice {
-    pub public_key: String,
-    pub name: String,
-    pub first_seen: u64,
-    pub last_approved: u64,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct PendingConsent {
-    pub session_id: String,
-    pub peer_pubkey: String,
-    pub peer_name: String,
-    pub created_at: u64,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-#[serde(tag = "res")]
-pub enum SdkResponse {
-    Stored { #[serde(with = "string_id")] id: BlockId },
-    Loaded { #[serde(with = "serde_bytes")] data: Vec<u8> },
-    Success,
-    List { items: Vec<String> }, // Keep for keys
-    PeerList { peers: Vec<crate::peers::PeerMetadata> },
-    PeerConnected { metadata: crate::peers::PeerMetadata },
-    Error { msg: String },
-    // Stat response
-    Status {
-        blocks: usize,
-        peers: usize,
-        memory_usage: usize, // simplified
-    },
-    StreamStarted { stream_id: u64 },
-    FlushSuccess,
-    TrustedList { items: Vec<TrustedDevice> },
-    ConsentList { items: Vec<PendingConsent> },
-    ConnectionStatus { state: String, msg: Option<String> },
-}
+// Removed local string_id, SdkCommand, SdkResponse, etc. Using memsdk versions.
+use memsdk::{SdkCommand, SdkResponse, TrustedDevice, PendingConsent};
 
 pub struct RpcServer {
     socket_path: String,
@@ -194,22 +106,37 @@ where S: AsyncReadExt + AsyncWriteExt + Unpin
         let cmd: SdkCommand = rmp_serde::from_slice(&buf)?;
         
         let response = match cmd {
-            SdkCommand::Store { data } => {
-                let id = rand::random::<u64>();
-                let block = Block { id, data };
-                match block_manager.put_block(block) {
-                    Ok(_) => SdkResponse::Stored { id },
-                    Err(e) => SdkResponse::Error { msg: e.to_string() },
+            SdkCommand::Store { data, durability } => {
+                     let mode = durability.unwrap_or(memsdk::Durability::Pinned);
+                     let id = rand::random::<u64>();
+                     
+                     let block = crate::blocks::Block {
+                         id,
+                         data,
+                         durability: mode,
+                         last_accessed: std::sync::atomic::AtomicU64::new(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()).into(),
+                     };
+                     
+                     match block_manager.put_block(block) {
+                         Ok(_) => SdkResponse::Stored { id },
+                         Err(e) => SdkResponse::Error { msg: e.to_string() },
+                     }
                 }
-            }
-            SdkCommand::StoreRemote { data, target } => {
-                let id = rand::random::<u64>();
-                let block = Block { id, data };
-                match block_manager.put_block_remote(block, target).await {
-                     Ok(_) => SdkResponse::Stored { id },
-                     Err(e) => SdkResponse::Error { msg: e.to_string() },
-                }
-            }
+            SdkCommand::StoreRemote { data, target, durability } => {
+                     let mode = durability.unwrap_or(memsdk::Durability::Pinned);
+                     let id = rand::random::<u64>();
+                     let block = crate::blocks::Block {
+                         id,
+                         data,
+                         durability: mode,
+                         last_accessed: std::sync::atomic::AtomicU64::new(0).into(),
+                     };
+
+                     match block_manager.put_block_remote(block, target).await {
+                         Ok(_) => SdkResponse::Stored { id },
+                         Err(e) => SdkResponse::Error { msg: e.to_string() },
+                     }
+                }       
             SdkCommand::Load { id } => {
                 match block_manager.get_block_async(id).await {
                     Ok(Some(block)) => SdkResponse::Loaded { data: block.data },
@@ -225,7 +152,16 @@ where S: AsyncReadExt + AsyncWriteExt + Unpin
             }
             SdkCommand::ListPeers => {
                 let peers = block_manager.get_peer_ext_list();
-                SdkResponse::PeerList { peers }
+                let sdk_peers = peers.into_iter().map(|p| memsdk::PeerMetadata {
+                    id: p.id,
+                    name: p.name,
+                    addr: p.addr,
+                    total_memory: p.total_memory,
+                    used_memory: p.used_memory,
+                    quota: p.quota,
+                    allowed_quota: p.allowed_quota,
+                }).collect();
+                SdkResponse::PeerList { peers: sdk_peers }
             }
             SdkCommand::Connect { addr, quota } => {
                 let bm_clone = block_manager.clone();
@@ -277,22 +213,21 @@ where S: AsyncReadExt + AsyncWriteExt + Unpin
                      Err(e) => SdkResponse::Error { msg: e.to_string() },
                 }
             }
-            SdkCommand::Set { key, data, target } => {
-                 let id = rand::random::<u64>();
-                 
-                 if let Some(t) = target {
-                     match block_manager.set_remote(&key, data, &t).await {
-                         Ok(remote_id) => SdkResponse::Stored { id: remote_id },
-                         Err(e) => SdkResponse::Error { msg: e.to_string() },
+            SdkCommand::Set { key, data, target, durability } => {
+                    let mode = durability.unwrap_or(memsdk::Durability::Pinned);
+                     if let Some(t) = target {
+                         match block_manager.set_remote(&key, data, &t, mode).await {
+                             Ok(id) => SdkResponse::Stored { id },
+                             Err(e) => SdkResponse::Error { msg: e.to_string() },
+                         }
+                     } else {
+                         // Local set
+                         match block_manager.set(&key, data, mode) {
+                             Ok(id) => SdkResponse::Stored { id },
+                             Err(e) => SdkResponse::Error { msg: e.to_string() },
+                         }
                      }
-                 } else {
-                     let block = Block { id, data };
-                     match block_manager.put_named_block(key, block) {
-                         Ok(_) => SdkResponse::Stored { id },
-                         Err(e) => SdkResponse::Error { msg: e.to_string() },
-                     }
-                 }
-            }
+                }          
             SdkCommand::Get { key, target } => {
                 let res = if let Some(t) = target {
                     block_manager.get_remote(&key, &t).await
@@ -335,29 +270,34 @@ where S: AsyncReadExt + AsyncWriteExt + Unpin
                     Err(e) => SdkResponse::Error { msg: e.to_string() },
                 }
             }
-            SdkCommand::StreamFinish { stream_id, target } => {
-                match block_manager.finalize_stream(stream_id) {
-                    Ok(data) => {
-                         let id = rand::random::<u64>();
-                         let block = Block { id, data };
-                         
-                         if let Some(t) = target {
-                             // Remote
-                             match block_manager.put_block_remote(block, Some(t)).await {
-                                 Ok(_) => SdkResponse::Stored { id },
-                                 Err(e) => SdkResponse::Error { msg: e.to_string() },
-                             }
-                         } else {
-                             // Local
-                             match block_manager.put_block(block) {
-                                 Ok(_) => SdkResponse::Stored { id },
-                                 Err(e) => SdkResponse::Error { msg: e.to_string() },
+            SdkCommand::StreamFinish { stream_id, target, durability } => {
+                     let mode = durability.unwrap_or(memsdk::Durability::Pinned);
+                     match block_manager.finalize_stream(stream_id) {
+                         Ok(data) => {
+                             if let Some(t) = target {
+                                 let id = rand::random::<u64>();
+                                 let block = crate::blocks::Block { id, data, durability: mode, last_accessed: std::sync::atomic::AtomicU64::new(0).into() };
+                                 match block_manager.put_block_remote(block, Some(t)).await {
+                                     Ok(_) => SdkResponse::Stored { id },
+                                     Err(e) => SdkResponse::Error { msg: e.to_string() },
+                                 }
+                             } else {
+                                 let id = rand::random::<u64>();
+                                 let block = crate::blocks::Block { 
+                                     id, 
+                                     data, 
+                                     durability: mode,
+                                     last_accessed: std::sync::atomic::AtomicU64::new(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()).into()
+                                 };
+                                 match block_manager.put_block(block) {
+                                     Ok(_) => SdkResponse::Stored { id },
+                                     Err(e) => SdkResponse::Error { msg: e.to_string() },
+                                 }
                              }
                          }
-                    }
-                    Err(e) => SdkResponse::Error { msg: e.to_string() },
-                }
-            }
+                         Err(e) => SdkResponse::Error { msg: e.to_string() },
+                     }
+                }       
             SdkCommand::Flush { target } => {
                 if let Some(t) = target {
                     match block_manager.flush_remote(t).await {

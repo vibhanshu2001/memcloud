@@ -35,7 +35,7 @@ pub extern "C" fn memcloud_store(data: *const c_void, size: usize, out_id: *mut 
     RUNTIME.block_on(async {
         let mut guard = CLIENT.lock().unwrap();
         if let Some(client) = &mut *guard {
-            match client.store(slice).await {
+            match client.store(slice, crate::Durability::Pinned).await {
                 Ok(id) => {
                     unsafe { *out_id = id };
                     0

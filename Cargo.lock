@@ -844,6 +844,7 @@ dependencies = [
  "hex",
  "log",
  "mdns-sd",
+ "memsdk",
  "rand",
  "rmp-serde",
  "serde",

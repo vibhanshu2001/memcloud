@@ -23,6 +23,7 @@ pub enum Message {
     PutBlock {
         id: BlockId,
         data: Vec<u8>,
+        durability: Option<memsdk::Durability>,
     },
     GetBlock {
         id: BlockId,
@@ -41,6 +42,7 @@ pub enum Message {
     PutKey {
         key: String,
         data: Vec<u8>,
+        durability: Option<memsdk::Durability>,
     },
     KeyStored {
         key: String,
@@ -185,17 +187,21 @@ pub async fn handle_connection_split(
                             peer_manager.satisfy_request(id, d);
                         }
                     }
-                    Message::PutBlock { id, data } => {
+                    Message::PutBlock { id, data, durability } => {
                          use crate::blocks::{BlockManager, Block};
                          let size = data.len() as u64;
+                         let mode = durability.unwrap_or(memsdk::Durability::Pinned); 
                          
-                         // Check Quota
                          if peer_manager.try_reserve_storage(peer_id, size) {
                              info!("Storing remote block {} from authenticated peer {}", id, peer_id);
-                             let block = Block { id, data };
+                             let block = Block { 
+                                 id, 
+                                 data, 
+                                 durability: mode,
+                                 last_accessed: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs())) 
+                             };
                              if let Err(e) = block_manager.put_block(block) {
                                  error!("Failed to store remote block: {}", e);
-                                 // Release quota on failure?
                                  peer_manager.release_storage(peer_id, size);
                              }
                          } else {
@@ -224,12 +230,12 @@ pub async fn handle_connection_split(
                         info!("Received Flush command from authenticated peer. Clearing local memory.");
                         block_manager.flush();
                     }
-                    Message::PutKey { key, data } => {
+                    Message::PutKey { key, data, durability } => {
                         let size = data.len() as u64;
+                        let mode = durability.unwrap_or(memsdk::Durability::Pinned);
+
                         if peer_manager.try_reserve_storage(peer_id, size) {
-                             // Use block_manager.set (needs to be exposed or match existing API)
-                             // Assuming block_manager has `set` (it handles SdkCommand::Set)
-                             match block_manager.set(&key, data) { 
+                             match block_manager.set(&key, data, mode) { 
                                   Ok(id) => {
                                       let resp = Message::KeyStored { key, id };
                                       let mut w = writer.lock().await;

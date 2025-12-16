@@ -165,6 +165,36 @@ flowchart TD
 - `js-sdk/` — TypeScript SDK (published as `memcloud` on npm)
 - `installers/` — Systemd/Launchd service files
 
+## 🧠 Memory Model
+
+MemCloud operates entirely in **Volatile RAM**. Data is **not** persisted to disk and will be lost if the node process restarts or crashes.
+
+### Durability Modes
+When storing data, you can choose between two durability modes:
+
+1.  **Pinned** (Default):
+    *   **Behavior**: Data is guaranteed to stay in memory until explicitly freed or the node restarts.
+    *   **Eviction**: Never evicted automatically.
+    *   **OOM**: If memory is full, new writes will fail. 
+    *   **Use Case**: Configuration, session state, critical temporary data.
+
+2.  **Cache**:
+    *   **Behavior**: Data is stored but can be sacrificed if memory is needed.
+    *   **Eviction**: Uses a **Random Sampling LRU** policy to evict old data when memory pressure hits.
+    *   **Use Case**: Caching build artifacts, processed logs, redundant copies.
+
+### CLI Usage
+Specify the mode using the `--mode` flag:
+
+```bash
+# Critical data (Pinned by default)
+memcli set "session:123" "UserSessionData"
+
+# Cache data (Evictable)
+memcli set "temp:logs" "..." --mode cache
+memcli store "build-artifact.bin" --mode cache
+```
+
 ## 🔒 Security & Authentication
 
 MemCloud employs a **Secure Session Protocol** (inspired by **Noise Protocol XX Pattern**) with **Transcript Hashing** to ensure data security on your LAN.

@@ -11,6 +11,8 @@ use crate::net::Message;
 pub struct Block {
     pub id: BlockId,
     pub data: Vec<u8>,
+    pub durability: memsdk::Durability,
+    pub last_accessed: std::sync::Arc<AtomicU64>,
 }
 
 #[allow(dead_code)]
@@ -71,6 +73,7 @@ impl InMemoryBlockManager {
              let msg = Message::PutBlock {
                  id: block.id,
                  data: block.data,
+                 durability: Some(block.durability),
              };
              
              // Send
@@ -124,6 +127,41 @@ impl InMemoryBlockManager {
         }
     }
 
+    fn evict_garbage(&self, needed: u64) -> u64 {
+        let mut freed = 0;
+        let mut attempts = 0;
+        let max_attempts = 100; // Prevent infinite loop
+
+        while freed < needed && attempts < max_attempts {
+            
+            let mut candidates: Vec<(BlockId, u64)> = Vec::new();
+            
+            let mut best_candidate: Option<BlockId> = None;
+            let mut oldest_time = u64::MAX;
+            
+            for entry in self.blocks.iter() {
+                if entry.value().durability == memsdk::Durability::Cache {
+                    let last = entry.value().last_accessed.load(Ordering::Relaxed);
+                    if last < oldest_time {
+                        oldest_time = last;
+                        best_candidate = Some(*entry.key());
+                    }
+                }
+            }
+            
+            if let Some(id) = best_candidate {
+                if let Ok(Some(block)) = self.evict_block(id) {
+                     freed += block.data.len() as u64;
+                }
+            } else {
+                // No cache blocks found
+                break;
+            }
+            attempts += 1;
+        }
+        freed
+    }
+
     pub async fn get_remote(&self, key: &str, target: &str) -> Result<Option<Vec<u8>>> {
         let peer_id_opt = if let Ok(uid) = uuid::Uuid::parse_str(target) {
             Some(uid)
@@ -156,14 +194,20 @@ impl InMemoryBlockManager {
         self.key_index.get(key).map(|v| *v)
     }
 
-    pub fn set(&self, key: &str, data: Vec<u8>) -> Result<BlockId> {
+    pub fn set(&self, key: &str, data: Vec<u8>, durability: memsdk::Durability) -> Result<BlockId> {
         let id = rand::random::<u64>();
-        let block = Block { id, data };
+        let block = Block { 
+            id, 
+            data, 
+            durability,
+            last_accessed: std::sync::Arc::new(AtomicU64::new(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs())) 
+        };
         self.put_named_block(key.to_string(), block)?;
         Ok(id)
     }
 
-    pub async fn set_remote(&self, key: &str, data: Vec<u8>, target: &str) -> Result<BlockId> {
+    pub async fn set_remote(&self, key: &str, data: Vec<u8>, target: &str, durability: memsdk::Durability) -> Result<BlockId> {
+        
         let peer_id_opt = if let Ok(uid) = uuid::Uuid::parse_str(target) {
             Some(uid)
         } else {
@@ -171,7 +215,7 @@ impl InMemoryBlockManager {
         };
 
         if let Some(peer_id) = peer_id_opt {
-             self.peer_manager.set_key_remote(peer_id, key.to_string(), data).await?;
+             self.peer_manager.set_key_remote(peer_id, key.to_string(), data, durability).await?;
              // Wait for ack
              self.peer_manager.wait_for_key_store(key).await
         } else {
@@ -254,7 +298,12 @@ impl InMemoryBlockManager {
              // C. Wait Result
              let data = fut.await?;
              info!("Fetched block {} from peer", id);
-             return Ok(Some(Block { id, data }));
+             return Ok(Some(Block { 
+                 id, 
+                 data,
+                 durability: memsdk::Durability::Cache, 
+                 last_accessed: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()))
+             }));
          }
          
          Ok(None)
@@ -326,15 +375,36 @@ impl InMemoryBlockManager {
 
 impl BlockManager for InMemoryBlockManager {
     fn put_block(&self, block: Block) -> Result<()> {
-        let size = block.data.len();
+        let size = block.data.len() as u64;
+        
+        // Check Memory Limit
+        let current = self.current_memory.load(Ordering::Relaxed);
+        if current + size > self.max_memory {
+            let needed = (current + size) - self.max_memory;
+            info!("Memory full (used: {}, max: {}, needed: {}). Attempting eviction...", current, self.max_memory, needed);
+            
+            let freed = self.evict_garbage(needed);
+            
+            if freed < needed {
+                // Still not enough space
+                if block.durability == memsdk::Durability::Pinned {
+                    anyhow::bail!("Out of Memory: Cannot allocate Pinned block (eviction failed to free enough space)");
+                } else {
+                    anyhow::bail!("Out of Memory: Cache allocation failed");
+                }
+            }
+        }
+
         self.blocks.insert(block.id, block.clone());
-        self.current_memory.fetch_add(size as u64, Ordering::Relaxed);
-        info!("Stored block {} ({} bytes)", block.id, size);
+        self.current_memory.fetch_add(size, Ordering::Relaxed);
+        info!("Stored block {} ({} bytes, mode: {:?})", block.id, size, block.durability);
         Ok(())
     }
 
     fn get_block(&self, id: BlockId) -> Result<Option<Block>> {
         if let Some(entry) = self.blocks.get(&id) {
+            // Update LRU
+            entry.value().last_accessed.store(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs(), Ordering::Relaxed);
             Ok(Some(entry.clone()))
         } else {
             // Check remote? (Stub for now, requires async Get)

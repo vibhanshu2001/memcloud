@@ -66,6 +66,15 @@ const CliDocs = () => {
             ]
         },
         {
+            id: "memory",
+            title: "Memory Model",
+            icon: Cpu,
+            subItems: [
+                { id: "mem-modes", title: "Durability Modes" },
+                { id: "mem-eviction", title: "Eviction Policy" }
+            ]
+        },
+        {
             id: "system",
             title: "System Commands",
             icon: Cpu,
@@ -366,6 +375,50 @@ const CliDocs = () => {
                             command='memcli get app-config --peer <NODE_NAME>'
                             description="Fetch data by key. Use --peer to query a specific node, otherwise queries the whole cluster."
                         />
+                    </section>
+
+                    {/* Memory Model */}
+                    <section id="memory" className="mb-16 scroll-mt-24 border-t border-border/50 pt-10">
+                        <div className="flex items-center gap-3 mb-6">
+                            <div className="p-2 rounded-lg bg-pink-500/10 text-pink-500"><Cpu className="w-6 h-6" /></div>
+                            <h2 className="text-2xl font-bold">Memory Model</h2>
+                        </div>
+                        <p className="text-muted-foreground mb-6">
+                            MemCloud operates entirely in <strong>Volatile RAM</strong>. Understanding durability modes is critical for managing data lifetime.
+                        </p>
+
+                        <h3 id="mem-modes" className="text-lg font-semibold mt-8 mb-2 scroll-mt-24">Durability Modes</h3>
+                        <p className="text-muted-foreground mb-4">
+                            You can specify the intent of your data allocation using the <code>--mode</code> flag.
+                        </p>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                            <div className="p-4 rounded-lg bg-secondary/10 border border-border/50">
+                                <h4 className="font-semibold text-primary mb-2">📌 Pinned (Default)</h4>
+                                <p className="text-sm text-muted-foreground mb-2">Guaranteed to stay in memory until explicitly freed or node restart.</p>
+                                <p className="text-xs text-muted-foreground opacity-70">Use for: Config, Session State</p>
+                            </div>
+                            <div className="p-4 rounded-lg bg-secondary/10 border border-border/50">
+                                <h4 className="font-semibold text-orange-500 mb-2">️♻️ Cache</h4>
+                                <p className="text-sm text-muted-foreground mb-2">Evictable if memory pressure hits. Uses LRU policy.</p>
+                                <p className="text-xs text-muted-foreground opacity-70">Use for: Artifacts, Logs, Temp Data</p>
+                            </div>
+                        </div>
+
+                        <CommandBlock
+                            command='memcli set "session:123" "critical-data" --mode pinned'
+                            description="Explicitly pin data (default behavior). Operations fail if memory is full."
+                        />
+                        <CommandBlock
+                            command='memcli store "build.log" --mode cache'
+                            description="Store as cache. If memory fills up, old cache data is automatically evicted."
+                        />
+
+                        <h3 id="mem-eviction" className="text-lg font-semibold mt-8 mb-2 scroll-mt-24">Eviction Policy</h3>
+                        <p className="text-muted-foreground mb-4">
+                            When <strong>Cache</strong> mode is used, MemCloud employs a <strong>Random Sampling LRU</strong> algorithm.
+                            Eviction is local to each node and never affects Pinned data.
+                        </p>
                     </section>
 
                     {/* System Commands */}

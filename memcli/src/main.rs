@@ -90,6 +90,9 @@ enum Commands {
         /// Optional: Target specific peer by name or ID
         #[arg(long)]
         peer: Option<String>,
+        /// Durability mode: 'pinned' (default) or 'cache'
+        #[arg(long, default_value = "pinned")]
+        mode: String,
     },
     /// Load a block by ID (as string)
     Load {
@@ -119,6 +122,9 @@ enum Commands {
         value: String,
         #[arg(long)]
         peer: Option<String>,
+        /// Durability mode: 'pinned' (default) or 'cache'
+        #[arg(long, default_value = "pinned")]
+        mode: String,
     },
     /// Get a value by key
     Get {
@@ -365,16 +371,22 @@ fn handle_node_action(action: NodeAction) -> anyhow::Result<()> {
 
 async fn handle_data_command(cmd: Commands, client: &mut MemCloudClient) -> anyhow::Result<()> {
     match cmd {
-        Commands::Store { data, remote, peer } => {
+        Commands::Store { data, remote, peer, mode } => {
             let start = Instant::now();
             let is_remote = remote || peer.is_some();
+            let durability = match mode.to_lowercase().as_str() {
+                "cache" => memsdk::Durability::Cache,
+                "pinned" => memsdk::Durability::Pinned,
+                _ => anyhow::bail!("Invalid mode: {}. Use 'pinned' or 'cache'", mode),
+            };
+            
             let id = if is_remote {
-                client.store_remote(data.as_bytes(), target_peer_string(peer)).await?
+                client.store_remote(data.as_bytes(), target_peer_string(peer), durability).await?
             } else {
-                client.store(data.as_bytes()).await?
+                client.store(data.as_bytes(), durability).await?
             };
             let duration = start.elapsed();
-            println!("Stored block ID: {} (remote: {}) (took {:?})", id, is_remote, duration);
+            println!("Stored block ID: {} (remote: {}, mode: {:?}) (took {:?})", id, is_remote, durability, duration);
         }
         Commands::Load { id } => {
             let start = Instant::now();
@@ -489,11 +501,16 @@ async fn handle_data_command(cmd: Commands, client: &mut MemCloudClient) -> anyh
             println!("Memory Usage: {} bytes", memory);
             println!("--------------------------------");
         }
-        Commands::Set { key, value, peer } => {
+        Commands::Set { key, value, peer, mode } => {
             let start = Instant::now();
-            let id = client.set(&key, value.as_bytes(), peer).await?;
+            let durability = match mode.to_lowercase().as_str() {
+                "cache" => memsdk::Durability::Cache,
+                "pinned" => memsdk::Durability::Pinned,
+                _ => anyhow::bail!("Invalid mode: {}. Use 'pinned' or 'cache'", mode),
+            };
+            let id = client.set(&key, value.as_bytes(), peer, durability).await?;
             let duration = start.elapsed();
-            println!("Set '{}' -> {} (Block ID: {}) (took {:?})", key, value, id, duration);
+            println!("Set '{}' -> {} (Block ID: {}, mode: {:?}) (took {:?})", key, value, id, durability, duration);
         }
         Commands::Get { key, peer } => {
             let start = Instant::now();

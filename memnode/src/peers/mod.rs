@@ -387,8 +387,8 @@ impl PeerManager {
         }
     }
 
-    pub async fn set_key_remote(&self, peer_id: Uuid, key: String, data: Vec<u8>) -> Result<()> {
-        let msg = Message::PutKey { key, data };
+    pub async fn set_key_remote(&self, peer_id: Uuid, key: String, data: Vec<u8>, durability: memsdk::Durability) -> Result<()> {
+        let msg = Message::PutKey { key, data, durability: Some(durability) };
         self.send_to_peer(peer_id, &msg).await
     }
 

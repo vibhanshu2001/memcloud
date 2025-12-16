@@ -51,25 +51,31 @@ mod string_id {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Durability {
+    Pinned,
+    Cache,
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "cmd")]
 pub enum SdkCommand {
-    Store { #[serde(with = "serde_bytes")] data: Vec<u8> },
-    StoreRemote { #[serde(with = "serde_bytes")] data: Vec<u8>, target: Option<String> },
+    Store { #[serde(with = "serde_bytes")] data: Vec<u8>, durability: Option<Durability> },
+    StoreRemote { #[serde(with = "serde_bytes")] data: Vec<u8>, target: Option<String>, durability: Option<Durability> },
     Load { #[serde(with = "string_id")] id: BlockId },
     Free { #[serde(with = "string_id")] id: BlockId },
     ListPeers,
     Connect { addr: String, quota: Option<u64> },
     UpdatePeerQuota { peer_id: String, quota: u64 },
     Disconnect { peer_id: String },
-    Set { key: String, #[serde(with = "serde_bytes")] data: Vec<u8>, target: Option<String> },
+    Set { key: String, #[serde(with = "serde_bytes")] data: Vec<u8>, target: Option<String>, durability: Option<Durability> },
     Get { key: String, target: Option<String> },
     ListKeys { pattern: String },
     Stat,
     PollConnection { addr: String },
     StreamStart { size_hint: Option<u64> },
     StreamChunk { stream_id: u64, chunk_seq: u32, #[serde(with = "serde_bytes")] data: Vec<u8> },
-    StreamFinish { stream_id: u64, target: Option<String> },
+    StreamFinish { stream_id: u64, target: Option<String>, durability: Option<Durability> },
     Flush { target: Option<String> },
     // Trust & Consent
     TrustList,
@@ -168,8 +174,8 @@ impl MemCloudClient {
         Ok(resp)
     }
 
-    pub async fn store(&mut self, data: &[u8]) -> Result<BlockId> {
-        let cmd = SdkCommand::Store { data: data.to_vec() };
+    pub async fn store(&mut self, data: &[u8], durability: Durability) -> Result<BlockId> {
+        let cmd = SdkCommand::Store { data: data.to_vec(), durability: Some(durability) };
         match self.send_command(cmd).await? {
             SdkResponse::Stored { id } => Ok(id),
             SdkResponse::Error { msg } => anyhow::bail!(msg),
@@ -177,8 +183,8 @@ impl MemCloudClient {
         }
     }
 
-    pub async fn store_remote(&mut self, data: &[u8], target: Option<String>) -> Result<BlockId> {
-        let cmd = SdkCommand::StoreRemote { data: data.to_vec(), target };
+    pub async fn store_remote(&mut self, data: &[u8], target: Option<String>, durability: Durability) -> Result<BlockId> {
+        let cmd = SdkCommand::StoreRemote { data: data.to_vec(), target, durability: Some(durability) };
         match self.send_command(cmd).await? {
             SdkResponse::Stored { id } => Ok(id),
             SdkResponse::Error { msg } => anyhow::bail!(msg),
@@ -260,8 +266,8 @@ impl MemCloudClient {
    }
     
     // KV Methods
-    pub async fn set(&mut self, key: &str, data: &[u8], target: Option<String>) -> Result<BlockId> {
-         let cmd = SdkCommand::Set { key: key.to_string(), data: data.to_vec(), target };
+    pub async fn set(&mut self, key: &str, data: &[u8], target: Option<String>, durability: Durability) -> Result<BlockId> {
+         let cmd = SdkCommand::Set { key: key.to_string(), data: data.to_vec(), target, durability: Some(durability) };
          match self.send_command(cmd).await? {
             SdkResponse::Stored { id } => Ok(id),
             SdkResponse::Error { msg } => anyhow::bail!(msg),
@@ -339,7 +345,7 @@ impl MemCloudClient {
         }
 
         // 3. Finish
-        let finish_cmd = SdkCommand::StreamFinish { stream_id, target };
+        let finish_cmd = SdkCommand::StreamFinish { stream_id, target, durability: None };
         match self.send_command(finish_cmd).await? {
             SdkResponse::Stored { id } => Ok(id),
             SdkResponse::Error { msg } => anyhow::bail!(msg),
