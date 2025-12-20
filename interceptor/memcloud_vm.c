@@ -407,7 +407,7 @@ static void page_fault_handler(int sig, siginfo_t *si, void *ctx_ptr) {
   pthread_mutex_unlock(&region_mutex);
 
   if (!found) {
-    // Not a MemCloud managed region, re-raise signal
+    // Not a MemCloud managed region, re-raise signal correctly
     signal(sig, SIG_DFL);
     raise(sig);
     return;
@@ -418,16 +418,12 @@ static void page_fault_handler(int sig, siginfo_t *si, void *ctx_ptr) {
 
   // 2. Fetch into temporary buffer BEFORE mapping
   // This avoids writing into PROT_NONE memory and holding locks during IO
-  // Stack allocate buffer for page (up to 16KB usually)
-  // For VLA usage, if page size is huge it might be risky but on standard
-  // systems it's fine
   uint8_t tmp_page[ps];
   log_fmt("[memcloud-vm] fetching page %lu from remote\n",
           (unsigned long)page_index);
   int fetched = memcloud_vm_fetch(region_id, page_index, tmp_page, ps);
   if (fetched != ps) {
     // Fallback: fill with zeros if fetch failed or incomplete
-    // This ensures program stability even if network fails
     memset(tmp_page, 0, ps);
   }
 
@@ -454,11 +450,14 @@ static void page_fault_handler(int sig, siginfo_t *si, void *ctx_ptr) {
 
   // 5. Update metadata under lock
   pthread_mutex_lock(&region_mutex);
-  region = find_region(page_start); // Re-find to be safe in case of race/change
+  region = find_region(page_start);
   if (region) {
-    region->dirty_bits[page_index] = 1;
+    region->dirty_bits[page_index] = 0;
   }
   pthread_mutex_unlock(&region_mutex);
+  log_fmt("[memcloud-vm] storing page %lu to remote\n",
+          (unsigned long)page_index);
+  memcloud_vm_store(region_id, page_index, page_start, ps);
 
   log_fmt("[memcloud-vm] successfully serviced fault at %p\n", page_start);
 }
@@ -466,24 +465,6 @@ static void page_fault_handler(int sig, siginfo_t *si, void *ctx_ptr) {
 static void *sync_thread(void *arg) {
   while (1) {
     usleep(100000);
-    long ps = sysconf(_SC_PAGESIZE);
-    pthread_mutex_lock(&region_mutex);
-    if (regions) {
-      for (int i = 0; i < MAX_REGIONS; i++) {
-        if (regions[i].active) {
-          size_t num_pages = regions[i].size / ps;
-          for (size_t j = 0; j < num_pages; j++) {
-            if (regions[i].dirty_bits[j]) {
-              void *p = (void *)((uintptr_t)regions[i].addr + (j * ps));
-              if (memcloud_vm_store(regions[i].region_id, j, p, ps) == 0) {
-                regions[i].dirty_bits[j] = 0;
-              }
-            }
-          }
-        }
-      }
-    }
-    pthread_mutex_unlock(&region_mutex);
   }
   return NULL;
 }
