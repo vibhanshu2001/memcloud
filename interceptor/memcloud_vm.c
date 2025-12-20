@@ -109,7 +109,7 @@ static void (*real_free)(void *) = NULL;
 #define internal_free real_free
 #endif
 
-static void sigsegv_handler(int sig, siginfo_t *si, void *ctx_ptr);
+static void page_fault_handler(int sig, siginfo_t *si, void *ctx_ptr);
 static void *sync_thread(void *arg);
 
 static void lazy_init() {
@@ -143,8 +143,11 @@ static void lazy_init() {
   struct sigaction sa;
   sa.sa_flags = SA_SIGINFO;
   sigemptyset(&sa.sa_mask);
-  sa.sa_sigaction = sigsegv_handler;
+  sa.sa_sigaction = page_fault_handler;
   sigaction(SIGSEGV, &sa, NULL);
+#ifdef __APPLE__
+  sigaction(SIGBUS, &sa, NULL);
+#endif
 
   pthread_t th;
   pthread_create(&th, NULL, sync_thread, NULL);
@@ -231,8 +234,17 @@ void *HOOK(malloc)(size_t size) {
   lazy_init();
 
   void *res = NULL;
-  if (size >= vm_threshold)
+  if (size >= vm_threshold) {
     res = allocate_remote_region(size);
+    if (!res) {
+      // INVARIANT VIOLATION: VM allocation failed for large request
+      // Log loudly before falling back to local memory
+      fprintf(stderr,
+              "[memcloud-vm] WARNING: VM allocation failed for %zu bytes. "
+              "Falling back to local malloc (no remote paging).\n",
+              size);
+    }
+  }
   if (!res)
     res = internal_malloc(size);
 
@@ -250,8 +262,14 @@ void *HOOK(calloc)(size_t nmemb, size_t size) {
   void *res = NULL;
   if (total >= vm_threshold) {
     res = allocate_remote_region(total);
-    if (res)
-      memset(res, 0, total);
+    // No memset - pages fault lazily on access.
+    // Daemon returns zeros for uninitialized pages.
+    if (!res) {
+      fprintf(stderr,
+              "[memcloud-vm] WARNING: VM allocation failed for %zu bytes "
+              "(calloc). Falling back to local calloc.\n",
+              total);
+    }
   }
   if (!res)
     res = internal_calloc(nmemb, size);
@@ -283,6 +301,11 @@ void *HOOK(realloc)(void *ptr, size_t size) {
         size_t c = (size < reg->size) ? size : reg->size;
         memcpy(new_p, ptr, c);
         free_remote_region(ptr);
+      } else {
+        fprintf(stderr,
+                "[memcloud-vm] WARNING: VM realloc failed for %zu bytes. "
+                "Falling back to local memory.\n",
+                size);
       }
     }
     if (!new_p) {
@@ -311,6 +334,11 @@ void *HOOK(realloc)(void *ptr, size_t size) {
       size_t c = (size < old_s) ? size : old_s;
       memcpy(res, ptr, c);
       internal_free(ptr);
+    } else {
+      fprintf(stderr,
+              "[memcloud-vm] WARNING: VM realloc failed for %zu bytes. "
+              "Falling back to local memory.\n",
+              size);
     }
   }
   if (!res)
@@ -333,7 +361,7 @@ void HOOK(free)(void *ptr) {
   in_hook = 0;
 }
 
-static void sigsegv_handler(int sig, siginfo_t *si, void *ctx_ptr) {
+static void page_fault_handler(int sig, siginfo_t *si, void *ctx_ptr) {
   void *fault_addr = si->si_addr;
   pthread_mutex_lock(&region_mutex);
   VmRegion *region = find_region(fault_addr);
@@ -342,8 +370,7 @@ static void sigsegv_handler(int sig, siginfo_t *si, void *ctx_ptr) {
         ((uintptr_t)fault_addr - (uintptr_t)region->addr) / PAGE_SIZE;
     void *page_start =
         (void *)((uintptr_t)region->addr + (page_index * PAGE_SIZE));
-    // No in_hook check here as it's a signal handler, but we use real_mmap
-    // directly
+    // Use real_mmap directly in signal handler
     if (real_mmap) {
       real_mmap(page_start, PAGE_SIZE, PROT_READ | PROT_WRITE,
                 MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
@@ -351,8 +378,11 @@ static void sigsegv_handler(int sig, siginfo_t *si, void *ctx_ptr) {
       region->dirty_bits[page_index] = 1;
     }
   } else {
-    signal(SIGSEGV, SIG_DFL);
-    raise(SIGSEGV);
+    // Re-raise with correct signal type (SIGSEGV or SIGBUS)
+    pthread_mutex_unlock(&region_mutex);
+    signal(sig, SIG_DFL);
+    raise(sig);
+    return;
   }
   pthread_mutex_unlock(&region_mutex);
 }
