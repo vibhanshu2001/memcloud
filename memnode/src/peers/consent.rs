@@ -19,6 +19,7 @@ pub struct PendingConsent {
     pub session_id: String,
     pub peer_pubkey: String,
     pub peer_name: String,
+    pub quota: u64,
     pub created_at: u64,
 }
 
@@ -36,15 +37,16 @@ impl ConsentManager {
         }
     }
 
-    pub fn request_consent(&self, session_id: String, peer_pubkey: String, peer_name: String) {
+    pub fn request_consent(&self, session_id: String, peer_pubkey: String, peer_name: String, quota: u64) {
         let mut lock = self.pending.lock().unwrap();
         lock.insert(session_id.clone(), PendingConsent {
             session_id,
             peer_pubkey: peer_pubkey.clone(),
             peer_name: peer_name.clone(),
+            quota,
             created_at: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs(),
         });
-        info!("Pending consent created for peer {} (key={})", peer_name, peer_pubkey); 
+        info!("Pending consent created for peer {} (key={}, quota={} bytes)", peer_name, peer_pubkey, quota);  
     }
 
     pub async fn wait_for_decision(&self, session_id: &str) -> ConsentDecision {

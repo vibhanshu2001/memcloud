@@ -113,6 +113,7 @@ pub struct PendingConsent {
     pub session_id: String,
     pub peer_pubkey: String,
     pub peer_name: String,
+    pub quota: u64,
     pub created_at: u64,
 }
 

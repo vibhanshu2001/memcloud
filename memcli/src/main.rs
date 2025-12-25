@@ -798,8 +798,8 @@ fn print_peers_table(peers: &[memsdk::PeerMetadata]) {
     // 1. Calculate column widths
     let h_node = "Node";
     let h_addr = "Address";
-    let h_in = "Allowed (In)";
-    let h_out = "Pool (Out)";
+    let h_in = "Allowed Storage";
+    let h_out = "Capacity Offered";
     
     let mut w_node = h_node.len();
     let mut w_addr = h_addr.len();
@@ -859,7 +859,7 @@ fn print_peers_table(peers: &[memsdk::PeerMetadata]) {
     // Bottom
     print_sep("└", "┴", "┘", "─");
 
-    println!("\n📊 Total Pooled RAM (Outbound): {}", format_bytes(total_pooled));
+    println!("\n📊 Total Pooled RAM (Capacity Offered): {}", format_bytes(total_pooled));
 }
 
 async fn handle_consent(client: &mut MemCloudClient) -> anyhow::Result<()> {
@@ -876,6 +876,7 @@ async fn handle_consent(client: &mut MemCloudClient) -> anyhow::Result<()> {
         for req in pending {
             println!("\nDevice: {} ({})", req.peer_name, req.peer_pubkey); 
             println!("Wants to connect. Request ID: {}", req.session_id);
+            println!("Offering Capacity: {}  (This capacity will be available to you)", format_bytes(req.quota));
             
             // Interaction
             let selection = dialoguer::Select::new()

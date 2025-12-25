@@ -354,6 +354,7 @@ where S: AsyncReadExt + AsyncWriteExt + Unpin
                     session_id: c.session_id,
                     peer_pubkey: c.peer_pubkey,
                     peer_name: c.peer_name,
+                    quota: c.quota,
                     created_at: c.created_at,
                 }).collect();
                 SdkResponse::ConsentList { items: rpc_items }

@@ -266,7 +266,7 @@ pub async fn handshake_responder(
         send_msg(stream, &HandshakeMessage::ConsentRequired { reason: "untrusted_peer".to_string() }).await?;
 
         let session_id = Uuid::new_v4().to_string();
-        consent_manager.request_consent(session_id.clone(), peer_pub_key_hex.clone(), auth_a.name.clone());
+        consent_manager.request_consent(session_id.clone(), peer_pub_key_hex.clone(), auth_a.name.clone(), hello_a.quota);
         
         // Wait
         let decision = consent_manager.wait_for_decision(&session_id).await;
